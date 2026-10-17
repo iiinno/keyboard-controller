@@ -17,8 +17,11 @@ class Wide {
         i := 0
         while (i < limit) {
             if (NumGet(buf.Ptr, i * 2, "ushort") = 0) {
-                if (i > start)
-                    entries.Push(StrGet(buf.Ptr + start * 2, i - start, "UTF-16"))
+                if (i = start) {
+                    start := limit
+                    break
+                }
+                entries.Push(StrGet(buf.Ptr + start * 2, i - start, "UTF-16"))
                 start := i + 1
             }
             i += 1

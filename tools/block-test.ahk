@@ -42,16 +42,15 @@ Log(message) {
 Release() {
     global Released
     if Released
-        return
+        return true
+    SetTimer(Drain, 0)
+    released := Interception.Close()
     Released := true
-    cleared := Interception.ClearAll()
-    try {
-        Interception.Close()
-    }
-    if cleared
-        Log("Released: filter cleared on every keyboard slot")
+    if released
+        Log("Release requested: Interception context destroyed")
     else
-        Log("ERROR: the filter could not be cleared. Reboot to be sure the built-in keyboard is free.")
+        Log("ERROR: Interception context could not be destroyed. Reboot if the built-in keyboard is not responsive.")
+    return released
 }
 
 Drain() {
@@ -69,10 +68,23 @@ Tick() {
     }
     SetTimer(Tick, 0)
     ToolTip()
-    Release()
+    released := Release()
     Log("Countdown finished")
-    MsgBox("Done. The built-in keyboard is released.`n`nLog: " LogPath, "block-test")
+    message := released
+        ? "Done. The Interception context was destroyed. Test the built-in keyboard now.`n`nLog: " LogPath
+        : "The Interception context could not be destroyed. Use recover.ahk or reboot if the keyboard does not respond.`n`nLog: " LogPath
+    MsgBox(message, "block-test")
     ExitApp(0)
+}
+
+OnBlockTestError(err, mode) {
+    ToolTip()
+    Log(Format("ERROR: unhandled error (mode={1}): {2} at {3} line {4}"
+        , mode, err.Message, err.File, err.Line))
+    Release()
+    MsgBox("block-test stopped after an error. If the built-in keyboard does not respond, run recover.ahk or reboot.`n`n" err.Message
+        , "block-test", "Icon!")
+    ExitApp(1)
 }
 
 OnBlockTestExit(reason, code) {
@@ -80,6 +92,7 @@ OnBlockTestExit(reason, code) {
     return 0
 }
 
+OnError(OnBlockTestError)
 OnExit(OnBlockTestExit)
 
 try {

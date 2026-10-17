@@ -22,7 +22,7 @@
 ; Run tools\block-test.ahk first. It blocks for a few seconds and releases by itself,
 ; which proves the release path before the persistent controller is trusted.
 
-G := { LogPath: "", PidPath: "" }
+G := { LogPath: "" }
 
 Main()
 
@@ -40,11 +40,6 @@ Main() {
     Persistent()
 
     G.LogPath := A_ScriptDir "\logs\controller.log"
-    G.PidPath := A_ScriptDir "\logs\controller.pid"
-    ; tools\toggle.ahk leaves this file to ask for a mode change. The mode and the
-    ; Interception filter both live in this process, and a filter is per handle, so
-    ; another process cannot flip them by itself.
-    G.RequestPath := A_ScriptDir "\logs\toggle.request"
     DirCreate(A_ScriptDir "\logs")
 
     try {
@@ -62,8 +57,8 @@ Main() {
         Health: "OK",
         FaultReason: "",
         InternalDeviceId: 0,
-        InternalHardwareId: "",
         DetectErrors: 0,
+        SettleUntil: G.Cfg.SettleMs ? A_TickCount + G.Cfg.SettleMs : 0,
         LastTick: A_TickCount,
         LastLoggedTarget: ""
     }
@@ -71,25 +66,17 @@ Main() {
     ; The log is appended across restarts and only rotated by the size cap in Log, so a
     ; previous session's failure is still readable after a restart.
     OnExit(OnScriptExit)
-    if FileExist(G.PidPath)
-        FileDelete(G.PidPath)
-    FileAppend(ProcessExist(), G.PidPath)
-
     Log("INFO", "App started, pid " ProcessExist())
 
     ; Nothing is filtered yet. Record the fail-open startup state explicitly.
     Log("INFO", "Internal keyboard PASS (startup default)")
 
-    InitInterception()
     BuildTray()
     RegisterHotkey()
 
-    ; Devices are still enumerating at logon, so the first real evaluation waits.
-    ; A period of 0 disables a timer, hence the floor of 1 ms.
-    SetTimer(InitialEvaluate, -Max(G.Cfg.SettleMs, 1))
+    ; Start polling, but do not block until SettleUntil has passed. This keeps startup
+    ; and resume on one timer path.
     SetTimer(PollTick, G.Cfg.PollMs)
-    ; Short interval so a key bound through Logi Options+ feels immediate.
-    SetTimer(ToggleRequestTick, 150)
     OnMessage(0x218, OnPowerBroadcast)
 }
 
@@ -97,37 +84,23 @@ Main() {
 ; device identification
 ; ---------------------------------------------------------------------------
 
-InitInterception() {
+PrepareBlock() {
     global G
 
     try {
         Interception.Open()
-    } catch as e {
-        EnterFault("Interception unavailable: " e.Message)
-        return
-    }
-
-    devices := []
-    try {
         devices := Interception.ListKeyboards()
-    } catch as e {
-        EnterFault("could not list keyboards: " e.Message)
-        return
-    }
-
-    for device in devices
-        Log("INFO", "Interception keyboard " device.id ": " device.hardwareId)
-
-    try {
+        for device in devices
+            Log("INFO", "Interception keyboard " device.id ": " device.hardwareId)
         internal := SelectInternalKeyboard(G.Cfg, devices)
     } catch as e {
-        EnterFault(e.Message)
-        return
+        EnterFault("cannot prepare built-in keyboard block: " e.Message)
+        return false
     }
 
     G.State.InternalDeviceId := internal.id
-    G.State.InternalHardwareId := internal.hardwareId
     Log("INFO", Format("Built-in keyboard is Interception device {1}: {2}", internal.id, internal.hardwareId))
+    return true
 }
 
 ; Sets State.Link from the present-device list. Any failure leaves the link unknown,
@@ -156,19 +129,13 @@ RefreshExternal() {
 ; so it can be read as the whole rule. Anything not positively known to be safe to
 ; block resolves to PASS, which is the fail-open requirement written as code.
 DecideInternalState(mode, link, health) {
-    if (health != "OK")
-        return "PASS"
-    if (mode = "FORCED_ON")
-        return "PASS"
-    if (link = "CONNECTED")
-        return "BLOCKED"
-    return "PASS"
+    return (mode = "AUTO" && link = "CONNECTED" && health = "OK") ? "BLOCKED" : "PASS"
 }
 
 Reconcile(reason) {
     global G
 
-    desired := DecideInternalState(G.State.Mode, G.State.Link, G.State.Health)
+    desired := G.State.SettleUntil ? "PASS" : DecideInternalState(G.State.Mode, G.State.Link, G.State.Health)
     if (desired = G.State.Applied)
         return
     ApplyState(desired, reason)
@@ -179,19 +146,20 @@ ApplyState(target, reason) {
 
     try {
         if (target = "BLOCKED") {
-            if (G.State.InternalDeviceId = 0)
-                throw Error("built-in keyboard was never identified")
+            if !PrepareBlock()
+                return
             Interception.BlockDevice(G.State.InternalDeviceId)
             SetTimer(DrainInternal, G.Cfg.DrainMs)
         } else {
-            ; Empty the queue before lifting the filter, so nothing stale is left for
-            ; the driver to hand back later.
-            if (G.State.InternalDeviceId != 0)
+            ; Empty the queue, then destroy the whole Interception context. The public
+            ; API does not report DeviceIoControl success for filter changes, so an
+            ; unverifiable get_filter(0) is not used as a release proof.
+            if (G.State.InternalDeviceId != 0 && Interception.IsOpen())
                 Interception.Drain(G.State.InternalDeviceId)
-            ; A clear that cannot be confirmed must not be recorded as PASS.
-            if !Interception.ClearAll()
-                throw Error("the Interception filter could not be cleared")
+            if !Interception.Close()
+                throw Error("the Interception context could not be destroyed")
             SetTimer(DrainInternal, 0)
+            G.State.InternalDeviceId := 0
         }
     } catch as e {
         G.State.Applied := "UNKNOWN"
@@ -209,10 +177,9 @@ ApplyState(target, reason) {
     UpdateTray()
 }
 
-; Fail-open exit for every unrecoverable problem. Drops every filter this context
-; holds, on every keyboard slot, then reports. Applied becomes PASS only when the
-; clear is confirmed, and UNKNOWN otherwise, so the log and the tray never claim the
-; keyboard is free when that is unproven.
+; Fail-open exit for every unrecoverable problem. Release destroys the Interception
+; context so this controller no longer holds device handles. PASS is controller state,
+; not an independent physical-input test.
 EnterFault(reason) {
     global G
 
@@ -222,13 +189,14 @@ EnterFault(reason) {
     if firstFault
         Log("ERROR", "FAULT: " reason)
 
-    cleared := Interception.ClearAll()
+    released := Interception.Close()
     SetTimer(DrainInternal, 0)
-    G.State.Applied := cleared ? "PASS" : "UNKNOWN"
+    G.State.InternalDeviceId := 0
+    G.State.Applied := released ? "PASS" : "UNKNOWN"
 
     if firstFault {
-        if !cleared
-            Log("ERROR", "the Interception filter could not be cleared. Restart this script, or run "
+        if !released
+            Log("ERROR", "the Interception context could not be destroyed. Restart this script, or run "
                 . "recover.ahk, to be sure the built-in keyboard is free.")
         UpdateTray()
         Notify("Laptop Keyboard: FAULT", reason)
@@ -266,15 +234,16 @@ PollTick() {
         return
     }
 
+    ; -1 means a suspend notification was received and resume has not been observed yet.
+    if (G.State.SettleUntil < 0)
+        return
+    if (G.State.SettleUntil && now < G.State.SettleUntil)
+        return
+    if (G.State.SettleUntil > 0)
+        G.State.SettleUntil := 0
+
     RefreshExternal()
     Reconcile("poll")
-}
-
-InitialEvaluate() {
-    global G
-
-    RefreshExternal()
-    Reconcile("startup")
     UpdateTray()
 }
 
@@ -287,15 +256,7 @@ HandleResume() {
     if (G.State.Applied = "BLOCKED")
         ApplyState("PASS", "resume")
     G.State.Link := "UNKNOWN"
-    Reconcile("resume-pass")
-    SetTimer(ResumeSettle, -Max(G.Cfg.SettleMs, 1))
-}
-
-ResumeSettle() {
-    global G
-
-    RefreshExternal()
-    Reconcile("resume-settled")
+    G.State.SettleUntil := G.Cfg.SettleMs ? A_TickCount + G.Cfg.SettleMs : 0
     UpdateTray()
 }
 
@@ -305,6 +266,7 @@ OnPowerBroadcast(wParam, lParam, msg, hwnd) {
     switch wParam {
         case 0x04:  ; PBT_APMSUSPEND
             Log("INFO", "Suspend")
+            G.State.SettleUntil := -1
             if (G.State.Applied = "BLOCKED")
                 ApplyState("PASS", "suspend")
         case 0x07, 0x12:  ; PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC
@@ -323,21 +285,6 @@ ToggleMode(*) {
     SetMode(G.State.Mode = "AUTO" ? "FORCED_ON" : "AUTO")
 }
 
-; Consumes a mode-change request left by tools\toggle.ahk, which is what a key bound
-; through Logi Options+ launches. Deleting the file is also the acknowledgement the
-; launcher waits for, so a missing controller gets reported instead of passing silently.
-ToggleRequestTick() {
-    global G
-
-    if !FileExist(G.RequestPath)
-        return
-    try {
-        FileDelete(G.RequestPath)
-    } catch {
-    }
-    ToggleMode()
-}
-
 SetMode(mode) {
     global G
 
@@ -349,7 +296,7 @@ SetMode(mode) {
     Reconcile("mode-change")
     UpdateTray()
     Notify("Laptop Keyboard: " mode, G.State.Applied = "BLOCKED"
-        ? "Built-in keyboard blocked" : "Built-in keyboard usable")
+        ? "Built-in keyboard blocked" : "Built-in keyboard PASS")
 }
 
 ; Tray action, and the manual recovery path for a failed identification: retry the
@@ -361,8 +308,6 @@ RefreshNow(*) {
         G.State.Health := "OK"
         G.State.FaultReason := ""
         G.State.InternalDeviceId := 0
-        G.State.InternalHardwareId := ""
-        InitInterception()
     }
     G.State.LastTick := A_TickCount
     RefreshExternal()
@@ -474,14 +419,11 @@ OnUnhandledError(err, mode) {
 
     Log("ERROR", Format("unhandled error (mode={1}): {2} at {3} line {4}"
         , mode, err.Message, err.File, err.Line))
-    cleared := Interception.ClearAll()
-    try {
-        Interception.Close()
-    }
-    if cleared
-        Log("ERROR", "exiting after an unhandled error; internal keyboard confirmed usable")
+    released := Interception.Close()
+    if released
+        Log("ERROR", "exiting after an unhandled error; Interception context destroyed")
     else
-        Log("ERROR", "exiting after an unhandled error, and the Interception filter could not be cleared. "
+        Log("ERROR", "exiting after an unhandled error, and the Interception context could not be destroyed. "
             . "Run recover.ahk or reboot to be sure the built-in keyboard is free.")
     Notify("Laptop Keyboard: error", err.Message)
     ExitApp(1)
@@ -492,19 +434,12 @@ OnScriptExit(reason, code) {
 
     Log("INFO", "App exiting (" reason ")")
 
-    cleared := Interception.ClearAll()
-    try {
-        Interception.Close()
-    }
-    if cleared
-        Log("INFO", "Internal keyboard PASS (exit)")
+    released := Interception.Close()
+    if released
+        Log("INFO", "Internal keyboard PASS (Interception context destroyed on exit)")
     else
-        Log("ERROR", "the Interception filter could not be cleared on exit. "
+        Log("ERROR", "the Interception context could not be destroyed on exit. "
             . "Run recover.ahk or reboot to be sure the built-in keyboard is free.")
 
-    try {
-        if FileExist(G.PidPath)
-            FileDelete(G.PidPath)
-    }
     return 0
 }

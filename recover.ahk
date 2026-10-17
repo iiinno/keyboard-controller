@@ -2,67 +2,40 @@
 #Warn All, Off
 #Include lib\Interception.ahk
 
-; Emergency recovery for a built-in keyboard that stayed blocked.
-;
-; Run this when main.ahk stopped responding or died while the built-in keyboard was
-; blocked. It does two things, in order:
-;   1. terminates a controller that is still running, which closes the handles that
-;      carry its input filter;
-;   2. clears the filter on every keyboard slot from a fresh context, which covers the
-;      case where the driver keeps the filter per device rather than per handle.
-;
-; Neither step is guaranteed to be what releases the keyboard, because the driver is
-; closed source. If the built-in keyboard still does not respond afterwards, reboot.
-; Nothing here is persistent, so rebooting always restores normal input.
-
-; A stale pid file plus pid reuse would otherwise make this kill an unrelated program,
-; so the recorded process is only terminated when it really is AutoHotkey. Every
-; AutoHotkey script owns a main window, hidden or not, so the process name is readable
-; through it. Checked on the target machine: this returns "AutoHotkey64.exe".
-IsAutoHotkeyProcess(pid) {
-    DetectHiddenWindows(true)
-    try {
-        name := WinGetProcessName("ahk_pid " pid)
-    } catch {
-        return false
-    }
-    return InStr(StrLower(name), "autohotkey") = 1
-}
+; Emergency recovery. Ask a running controller to exit cleanly, then issue a
+; best-effort filter clear from a fresh Interception context. If input is still stuck,
+; reboot Windows.
 
 reported := []
 
-pidPath := A_ScriptDir "\logs\controller.pid"
-if FileExist(pidPath) {
-    pidText := Trim(FileRead(pidPath))
-    if (pidText != "" && IsInteger(pidText) && ProcessExist(Integer(pidText))) {
-        if IsAutoHotkeyProcess(Integer(pidText)) {
-            ProcessClose(Integer(pidText))
-            Sleep(400)
-            reported.Push("Terminated the running controller (pid " pidText ").")
-        } else {
-            reported.Push("Pid " pidText " is running but is not AutoHotkey, so it was left alone. "
-                . "If the controller is still running, end AutoHotkey64.exe in Task Manager.")
+DetectHiddenWindows(true)
+controllerTitle := A_ScriptDir "\main.ahk - AutoHotkey v ahk_class AutoHotkey"
+if hwnd := WinExist(controllerTitle) {
+    pid := WinGetPID("ahk_id " hwnd)
+    try {
+        WinClose("ahk_id " hwnd)
+        if WinWaitClose("ahk_id " hwnd, , 2) {
+            reported.Push("Closed the running controller.")
+        } else if ProcessExist(pid) {
+            ProcessClose(pid)
+            reported.Push("Stopped the unresponsive controller.")
         }
-    } else {
-        reported.Push("No running controller was recorded.")
+    } catch as e {
+        reported.Push("Could not stop the running controller: " e.Message)
     }
-} else {
-    reported.Push("No controller pid file was found, so no controller was terminated.")
 }
 
-cleared := false
 try {
     Interception.Open()
-    cleared := Interception.ClearAll()
-    Interception.Close()
+    reported.Push("Opened a fresh Interception context for recovery.")
 } catch as e {
     reported.Push("Could not reach Interception: " e.Message)
+} finally {
+    Interception.Close()
 }
-if cleared
-    reported.Push("Cleared the Interception filter on every keyboard slot.")
 
 reported.Push("")
-reported.Push("Try the built-in keyboard now. If it still does not respond, reboot.")
+reported.Push("Try the built-in keyboard now. If it still does not respond, reboot Windows.")
 
 text := ""
 for line in reported

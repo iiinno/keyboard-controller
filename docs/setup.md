@@ -59,7 +59,7 @@ Copy-Item .\config.example.ini .\config.ini
 
 `internal_keyboard.match` には、内蔵キーボードのInterceptionハードウェアIDにだけ含まれる文字列を入れます。候補がちょうど1台にならなければコントローラーは遮断しません。
 
-`external_keyboard.match` には、外付けキーボードの現在のHIDインスタンスIDに含まれる文字列を入れます。BluetoothとUSBレシーバーでIDが変わる場合は、カンマ区切りで両方を書けます。
+`external_keyboard.match` には、外付けキーボードの現在のHIDインスタンスIDに含まれる文字列を入れます。BluetoothとUSBレシーバーでIDが変わる場合があります。PnPの `PRESENT` はHIDインスタンスの存在だけを表し、実際にキー入力できることは保証しません。特にUSBレシーバーがキーボード本体の電源断後も残る構成では、そのレシーバーIDをAUTO判定に使わないでください。手順8で本体の電源断・切断に追従して内蔵キーボードが戻ることを実機確認できたIDだけを設定します。
 
 `internal_keyboard.exclude` は任意です。外付けキーボードのVIDやPIDの数字を入れておくと、内蔵キーボードの候補から明示的に除外できます。
 
@@ -90,6 +90,7 @@ Copy-Item .\config.example.ini .\config.ini
 2. トレイの `Force Internal Keyboard ON` で戻る
 3. トレイの `Exit` で終了すると戻る
 4. スリープ復帰直後は一度PASSになり、設定した待機時間の後に再評価される
+5. 内蔵キーボードのCtrl・Alt・Shiftなどを押したままAUTO遮断へ移らない。押下中に切り替えた場合は修飾状態が残る可能性があるため、必要なら同じキーを一度押して離して状態を戻す
 
 強制終了時の挙動はInterceptionドライバ側に依存します。確認する場合は、マウスと再起動手段を確保した状態で行ってください。
 
@@ -97,10 +98,7 @@ Copy-Item .\config.example.ini .\config.ini
 
 `general.toggle_hotkey` にはAutoHotkeyのホットキー記法を使います。
 
-Logi Options+など、外付けキーボード側だけにアクションを割り当てられるソフトがある場合は、次のどちらかを設定できます。
-
-- `toggle_hotkey` と同じキーストロークを送る
-- `tools\toggle.ahk` を起動する
+Logi Options+など、外付けキーボード側だけにアクションを割り当てられるソフトがある場合は、`toggle_hotkey` と同じキーストロークを送るよう設定します。
 
 `tools\key-tester.ahk` はF13からF24やメディアキーなど、通常入力に使いにくいキーのAutoHotkey名を確認するための補助ツールです。
 

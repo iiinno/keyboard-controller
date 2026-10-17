@@ -3,7 +3,7 @@
 
 ; Thin AHK v2 wrapper over the separately licensed Interception API.
 ; Only the pieces this project needs: create a context, list keyboards with their
-; hardware IDs, filter one device, and clear every filter again.
+; hardware IDs, filter one device, and release the context again.
 ;
 ; The filter is applied per device by interception_set_filter, which calls a predicate
 ; once per device index and applies the filter only where the predicate returns
@@ -34,22 +34,16 @@ class Interception {
     static KEY_NONE := 0x0000
     static KEY_ALL := 0xFFFF
     static MAX_KEYBOARD := 10
-    static MAX_DEVICE := 20
 
     ; Hardware IDs arrive as UTF-16. The sample in the Interception repository reads
     ; them into a 1000-byte buffer, so this matches the size the driver expects.
     static HWID_BYTES := 1000
 
     static _fn := Map()
+    static _module := 0
     static _ctx := 0
     static _pred := 0
     static _open := false
-
-    ; The device this context is filtering, 0 when none. Tracking it is what lets
-    ; ClearAll tell "nothing was ever filtered" apart from "the clear failed". Without
-    ; it, a failed clear after the context closed would be reported as PASS, which is
-    ; the one claim this project must never get wrong.
-    static _filterDevice := 0
 
     static IsOpen() {
         return Interception._open
@@ -61,18 +55,12 @@ class Interception {
         if Interception._open
             return
 
-        ; The DLL sits next to this file. Resolving it from A_LineFile, which names the
-        ; file the current line belongs to, keeps it working when the including script
-        ; lives somewhere else. The A_ScriptDir forms stay as fallbacks.
+        ; Load only the DLL placed next to this wrapper. Never fall back to the
+        ; process DLL search path.
         libDir := RegExReplace(A_LineFile, "\\[^\\]*$")
-        hModule := 0
-        for candidate in [libDir "\interception.dll"
-            , A_ScriptDir "\lib\interception.dll"
-            , A_ScriptDir "\..\lib\interception.dll", "interception.dll"] {
-            hModule := DllCall("LoadLibraryW", "wstr", candidate, "ptr")
-            if hModule
-                break
-        }
+        dllPath := libDir "\interception.dll"
+        hModule := DllCall("LoadLibraryExW", "wstr", dllPath, "ptr", 0
+            , "uint", 0x00000100 | 0x00000800, "ptr")
         if !hModule
             throw Error("interception.dll could not be loaded. Put the "
                 . (A_PtrSize = 8 ? "64-bit" : "32-bit")
@@ -85,18 +73,35 @@ class Interception {
         for name in ["interception_create_context", "interception_destroy_context"
             , "interception_set_filter", "interception_receive", "interception_get_hardware_id"] {
             addr := DllCall("GetProcAddress", "ptr", hModule, "astr", name, "ptr")
-            if !addr
+            if !addr {
+                DllCall("FreeLibrary", "ptr", hModule)
+                Interception._fn.Clear()
                 throw Error("interception.dll has no export " name)
+            }
             Interception._fn[name] := addr
         }
 
+        Interception._module := hModule
         Interception._ctx := DllCall(Interception._fn["interception_create_context"], "ptr")
-        if !Interception._ctx
+        if !Interception._ctx {
+            DllCall("FreeLibrary", "ptr", Interception._module)
+            Interception._module := 0
+            Interception._fn.Clear()
             throw Error("interception_create_context failed, which means the Interception driver is "
                 . "not installed or not running yet. Run install-interception.exe /install as "
                 . "administrator and reboot (see docs\setup.md).")
+        }
 
-        Interception._pred := CallbackCreate(InterceptionPredicate, "F", 1)
+        try {
+            Interception._pred := CallbackCreate(InterceptionPredicate, "F", 1)
+        } catch as e {
+            DllCall(Interception._fn["interception_destroy_context"], "ptr", Interception._ctx)
+            Interception._ctx := 0
+            DllCall("FreeLibrary", "ptr", Interception._module)
+            Interception._module := 0
+            Interception._fn.Clear()
+            throw e
+        }
         Interception._open := true
     }
 
@@ -114,17 +119,16 @@ class Interception {
                 , "uint", Interception.HWID_BYTES, "uint")
             if (nBytes = 0)
                 continue
-            ; The driver may report several hardware IDs for one device. Reading the whole
-            ; buffer is safe because it is zero-filled, and the reader drops the empty tail.
-            hardwareId := Wide.ReadJoined(buf, Interception.HWID_BYTES, "|")
+            ; Parse only the bytes the API says it wrote.
+            hardwareId := Wide.ReadJoined(buf, Min(nBytes, Interception.HWID_BYTES), "|")
             if (hardwareId != "")
                 found.Push({ id: device, hardwareId: hardwareId })
         }
         return found
     }
 
-    ; Filters every stroke from one keyboard device. Throws if the driver rejects the
-    ; call, and refuses a device index that is not a keyboard slot.
+    ; Filters every stroke from one keyboard device. The upstream setter is void, so
+    ; release destroys the whole context rather than trusting an unverifiable readback.
     static BlockDevice(device) {
         ; Guarded here as well as in the predicate, because filtering a mouse slot would
         ; take away one of the recovery paths.
@@ -132,26 +136,11 @@ class Interception {
             throw Error("refusing to filter device " device ", which is not a keyboard slot (1 to "
                 . Interception.MAX_KEYBOARD ")")
         Interception._applyFilter(device, Interception.KEY_ALL)
-        Interception._filterDevice := device
     }
 
-    ; Clears the filter on every keyboard slot, not only the one recorded, so a stale
-    ; filter cannot survive on a slot we no longer remember. Returns true only when no
-    ; filter of ours remains.
+    ; Best-effort explicit clear used by Close().
     static ClearAll() {
-        if !Interception._open {
-            ; This context never opened a handle, so it cannot be holding a filter. If it
-            ; did open one and then closed with a failed clear, _filterDevice still names
-            ; the device, and this reports false.
-            return Interception._filterDevice = 0
-        }
-        try {
-            Interception._applyFilterAll(Interception.KEY_NONE)
-            Interception._filterDevice := 0
-            return true
-        } catch {
-            return false
-        }
+        Interception._applyFilterAll(Interception.KEY_NONE)
     }
 
     ; Consumes and discards whatever the device has queued. Discarding is the block.
@@ -175,16 +164,22 @@ class Interception {
         return total
     }
 
-    ; Clears every filter, then releases the context. A clear failure is remembered in
-    ; _filterDevice, so a later ClearAll still reports it instead of assuming the closed
-    ; context left nothing behind.
+    ; Release follows the upstream context lifecycle. Destroying the context closes every
+    ; Interception device handle. Returns true when that call completed; this is not a
+    ; physical-input test.
     static Close() {
         if !Interception._open
-            return
-        Interception.ClearAll()
+            return true
+
+        ; set_filter is void, so this is best-effort. Context destruction below is the
+        ; actual lifecycle boundary and closes every device handle.
+        try Interception.ClearAll()
         try {
             DllCall(Interception._fn["interception_destroy_context"], "ptr", Interception._ctx)
+        } catch {
+            return false
         }
+
         Interception._ctx := 0
         if Interception._pred {
             try {
@@ -193,6 +188,12 @@ class Interception {
             Interception._pred := 0
         }
         Interception._open := false
+        if Interception._module {
+            DllCall("FreeLibrary", "ptr", Interception._module)
+            Interception._module := 0
+        }
+        Interception._fn.Clear()
+        return true
     }
 
     ; Applies a filter to one device. The predicate matches that exact index, so no
