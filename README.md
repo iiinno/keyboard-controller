@@ -1,0 +1,133 @@
+# keyboard-controller
+
+WindowsノートPCの上に外付けキーボードを置いて使うための、AutoHotkey v2製キーボードコントローラーです。指定した外付けキーボードが接続されている間だけ内蔵キーボードの入力を遮断します。内蔵デバイス自体を無効化しないため、切断・エラー・終了時は入力を通す側へ戻します。
+
+Interceptionを使ってキーボード単位で入力を扱うため、外付けキーボード、マウス、タッチパッドは通常どおり使えます。
+
+## 内蔵キーボードを遮断する条件
+
+次の3条件がそろった場合だけ `BLOCKED` になります。
+
+1. モードが `AUTO`
+2. 設定した外付けキーボードを現在接続中と判定できる
+3. コントローラーが正常に動作している
+
+それ以外は `PASS` です。接続状態を取得できない、内蔵キーボードを一意に特定できない、Interceptionの初期化に失敗した、といった場合も遮断しません。
+
+| モード | 外付け接続 | 内蔵キーボード |
+| --- | --- | --- |
+| `AUTO` | 接続中 | `BLOCKED` |
+| `AUTO` | 未接続・不明 | `PASS` |
+| `FORCED_ON` | 任意 | `PASS` |
+| `FAULT` | 任意 | 解除を試行。確認できなければ `UNKNOWN` |
+
+`UNKNOWN` は解除を確認できなかった状態です。`PASS` と偽って表示しません。
+
+## 導入
+
+必要なものは次の3つです。
+
+- Windows 11。現時点で実機確認しているOSです
+- AutoHotkey v2 64-bit
+- [Interception](https://github.com/oblitum/Interception)
+
+Interceptionのバイナリはこのリポジトリに含めていません。公式リリースから64-bit版 `interception.dll` を `lib\interception.dll` に配置し、ドライバをインストールして再起動してください。
+
+その後は次の順で進めます。
+
+```text
+1. config.example.ini を config.ini にコピー
+2. tools\list-devices.ahk で内蔵・外付けキーボードのIDを確認
+3. config.ini の internal_keyboard.match / external_keyboard.match を設定
+4. tools\block-test.ahk で8秒間の遮断と自動解除を確認
+5. main.ahk を起動
+```
+
+詳しい手順は [`docs/setup.md`](docs/setup.md) にあります。
+
+## 設定
+
+`config.ini` は端末ごとの設定なのでGit管理しません。最初に `config.example.ini` をコピーして作成します。
+
+```ini
+[internal_keyboard]
+match=LEN0071
+exclude=046D,B372
+
+[external_keyboard]
+match=_DEV_VID&02046D_PID&B372_,VID_046D&PID_B372
+```
+
+上は実機検証に使った例です。別の機種では `tools\list-devices.ahk` の出力から値を選んでください。
+
+`internal_keyboard.match` に一致するInterceptionキーボードが1台でなければ遮断しません。`exclude` は外付けキーボードを内蔵と誤認しないための追加条件です。
+
+主なタイミング設定は次のとおりです。
+
+| キー | 既定値 | 用途 |
+| --- | ---: | --- |
+| `poll_ms` | 1000 | 外付けHIDの存在確認間隔 |
+| `settle_ms` | 3000 | 起動・復帰後にデバイス列挙が落ち着くまで待つ時間 |
+| `drain_ms` | 10 | 遮断中の内蔵キーボード入力を読み捨てる間隔 |
+| `resume_gap_factor` | 3 | 電源イベントを取り逃した場合に復帰とみなす補助判定 |
+
+## モードを切り替える
+
+トレイメニューから `AUTO` と `FORCED_ON` を切り替えられます。
+
+`toggle_hotkey` にAutoHotkeyのホットキーを設定する方法もあります。Logi Options+など、外付けキーボード側だけに割り当てられるアプリがある場合は `tools\toggle.ahk` を起動する設定にすると、内蔵キーボードから誤って切り替えにくくなります。
+
+## 内蔵キーボードが戻らない場合
+
+次の順で復旧します。
+
+1. 外付けキーボードの電源を切るか、Bluetoothを切断する
+2. マウスまたはタッチパッドから `recover.ahk` を実行する
+3. 改善しなければWindowsを再起動する
+
+Interceptionのフィルタは永続化されないため、再起動後は通常入力に戻ります。
+
+## ファイル構成
+
+```text
+keyboard-controller/
+├─ main.ahk                 常駐コントローラー
+├─ recover.ahk              緊急復旧
+├─ config.example.ini       公開用の設定例
+├─ lib/
+│  ├─ Config.ahk            設定読み込みと検証
+│  ├─ Devices.ahk           内蔵・外付けキーボードの判定
+│  ├─ Interception.ahk      Interception APIの薄いラッパー
+│  ├─ Pnp.ahk               現在接続中のPnPデバイス列挙
+│  └─ Wide.ahk              UTF-16マルチ文字列の読み取り
+├─ tools/
+│  ├─ block-test.ahk        8秒だけ遮断する安全確認
+│  ├─ key-tester.ahk        ホットキー候補の確認
+│  ├─ list-devices.ahk      デバイスIDの確認
+│  └─ toggle.ahk            常駐プロセスへのモード切替依頼
+└─ docs/
+   ├─ setup.md              導入と確認手順
+   └─ validation.md         実機で確認した範囲
+```
+
+実行時には `config.ini`、`logs\`、`lib\interception.dll` が必要または生成されますが、いずれもGit管理の対象外です。
+
+## 実機で確認した範囲
+
+2026年10月17日にWindows 11、AutoHotkey v2、Lenovo ThinkPadの内蔵キーボードとLogitech Bluetoothキーボードで確認しています。内蔵キーボードだけの遮断、解除、18秒間のBLOCK維持、正常終了時のPASS復帰、モード切替まで実機ログで確認済みです。
+
+詳細と未確認項目は [`docs/validation.md`](docs/validation.md) に分けています。
+
+## 制約
+
+- Interceptionドライバの導入には管理者権限と再起動が必要です
+- 内蔵キーボードの特定はハードウェアIDの部分一致なので、端末ごとに設定が必要です
+- 遮断中は内蔵キーボードの入力を読み捨てるため、遮断と解除の境目に押したキーは失われる場合があります
+- 制御プロセスを強制終了した場合のドライバ挙動はInterception側に依存します。`recover.ahk` と再起動を復旧手段として残しています
+- AutoHotkeyの通常ホットキーだけでは、同じキーがどの物理キーボードから来たかを区別できません
+
+## ライセンス
+
+このリポジトリのコードはMIT Licenseです。
+
+Interceptionは別ライセンスの外部依存です。バイナリやドライバはこのリポジトリに含めていません。利用条件は公式リポジトリと [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) を確認してください。

@@ -1,0 +1,14 @@
+# Machine-specific configuration
+config.ini
+
+# Runtime state and diagnostics
+logs/
+tools/device-list.txt
+
+# Third-party binary dependency
+lib/interception.dll
+
+# Local shortcuts and OS files
+*.lnk
+Thumbs.db
+.DS_Store
