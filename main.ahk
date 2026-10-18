@@ -78,6 +78,9 @@ Main() {
     ; and resume on one timer path.
     SetTimer(PollTick, G.Cfg.PollMs)
     OnMessage(0x218, OnPowerBroadcast)
+    ; A launcher started by device software can request a toggle without synthesizing
+    ; any keystrokes or introducing request files.
+    OnMessage(0x8005, OnToggleRequest)
 }
 
 ; ---------------------------------------------------------------------------
@@ -283,6 +286,10 @@ ToggleMode(*) {
     global G
 
     SetMode(G.State.Mode = "AUTO" ? "FORCED_ON" : "AUTO")
+}
+
+OnToggleRequest(*) {
+    ToggleMode()
 }
 
 SetMode(mode) {

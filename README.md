@@ -75,7 +75,7 @@ match=_DEV_VID&02046D_PID&B372_,VID_046D&PID_B372
 
 トレイメニューから `AUTO` と `FORCED_ON` を切り替えられます。
 
-`toggle_hotkey` にAutoHotkeyのホットキーを設定できます。Logi Options+など、外付けキーボード側だけにアクションを割り当てられるアプリがある場合は、そのキーから `toggle_hotkey` と同じキーストロークを送る設定にします。
+`toggle_hotkey` は通常のAutoHotkeyホットキー用です。Logi Options+などのデバイスアプリでは、**「アプリケーション／ファイルを開く」から `tools/toggle.ahk`（またはこのスクリプトを起動するショートカット）を実行**できます。キーの送信は不要です。ランチャーは常駐中の `main.ahk` にWindowsメッセージを送るだけで、要求ファイルは作りません。
 
 ## 内蔵キーボードが戻らない場合
 
@@ -103,7 +103,8 @@ keyboard-controller/
 ├─ tools/
 │  ├─ block-test.ahk        8秒だけ遮断する安全確認
 │  ├─ key-tester.ahk        ホットキー候補の確認
-│  └─ list-devices.ahk      デバイスIDの確認
+│  ├─ list-devices.ahk      デバイスIDの確認
+│  └─ toggle.ahk            外付けキーボード用の切替ランチャー
 └─ docs/
    ├─ setup.md              導入と確認手順
    └─ validation.md         実機で確認した範囲

@@ -98,7 +98,7 @@ Copy-Item .\config.example.ini .\config.ini
 
 `general.toggle_hotkey` にはAutoHotkeyのホットキー記法を使います。
 
-Logi Options+など、外付けキーボード側だけにアクションを割り当てられるソフトがある場合は、`toggle_hotkey` と同じキーストロークを送るよう設定します。
+Logi Options+などで「キーストロークの割り当て」が使えない場合は、**「アプリケーション／ファイルを開く」で `tools/toggle.ahk` か、それをAutoHotkeyで起動するショートカットを指定**してください。ランチャーは実キー操作を送信せず、常駐コントローラーへ直接切替を要求します。
 
 `tools\key-tester.ahk` はF13からF24やメディアキーなど、通常入力に使いにくいキーのAutoHotkey名を確認するための補助ツールです。
 
