@@ -12,3 +12,8 @@ lib/interception.dll
 *.lnk
 Thumbs.db
 .DS_Store
+
+# Portable build output
+dist/
+portable/keyboard-controller
+portable/coverage.out

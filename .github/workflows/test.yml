@@ -29,3 +29,13 @@ jobs:
       - name: Validate scripts and run driver-free regression tests
         shell: pwsh
         run: ./tests/run.ps1 -AutoHotkey "$env:RUNNER_TEMP\AutoHotkey\AutoHotkey64.exe"
+      - name: Inspect official driver installer bundle without installing
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'Interception.zip'
+          Invoke-WebRequest 'https://github.com/oblitum/Interception/releases/download/v1.0.1/Interception.zip' -OutFile $zip
+          Write-Host ('INTERCEPTION_SHA256:' + (Get-FileHash $zip -Algorithm SHA256).Hash)
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $bundle = [IO.Compression.ZipFile]::OpenRead($zip)
+          try { $bundle.Entries | ForEach-Object { Write-Host ('INTERCEPTION_FILE:' + $_.FullName) } }
+          finally { $bundle.Dispose() }
