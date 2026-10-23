@@ -60,14 +60,14 @@ static int describe(io_service_t service, KCDevice *out, int *keyboard) {
     int strings_ok = string_property(properties, CFSTR(kIOHIDProductKey), out->name, sizeof(out->name))
         && string_property(properties, CFSTR(kIOHIDSerialNumberKey), out->serial, sizeof(out->serial))
         && string_property(properties, CFSTR(kIOHIDTransportKey), out->transport, sizeof(out->transport));
-    CFTypeRef builtin = IORegistryEntrySearchCFProperty(service, kIOServicePlane, CFSTR("Built-In"),
-        kCFAllocatorDefault, kIORegistryIterateParents | kIORegistryIterateRecursively);
+    /* A built-in USB controller does not make every attached keyboard built-in. */
+    CFTypeRef builtin = CFDictionaryGetValue(properties, CFSTR("Built-In"));
     if (builtin) {
         if (CFGetTypeID(builtin) == CFBooleanGetTypeID()) out->built_in = CFBooleanGetValue(builtin);
-        CFRelease(builtin);
     }
     out->blockable = *keyboard && pairs_known && !pointer && strings_ok && out->vendor
-        && out->product && out->name[0] && strcasecmp(out->transport, "Virtual") != 0;
+        && out->product && out->name[0] && strcasecmp(out->transport, "Virtual") != 0
+        && strcasestr(out->name, "virtual") == NULL;
     result = IORegistryEntryGetRegistryEntryID(service, &out->entry_id);
     CFRelease(properties);
     if (*keyboard && !strings_ok) return kIOReturnBadArgument; /* Never truncate identity. */

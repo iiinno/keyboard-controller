@@ -3,6 +3,7 @@ param(
     [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA 'keyboard-controller'),
     [string]$SourceRoot = $PSScriptRoot,
     [string]$DownloadCache = '',
+    [string]$ShortcutDirectory = '',
     [switch]$NoLaunch,
     [switch]$NoShortcuts
 )
@@ -82,7 +83,7 @@ try {
         Copy-Item -LiteralPath $_.FullName -Destination $runtime -Force
     }
     if (-not $NoShortcuts) {
-        $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyboard Controller'
+        $menu = if ($ShortcutDirectory) { $ShortcutDirectory } else { Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyboard Controller' }
         New-Item -ItemType Directory -Path $menu -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
         foreach ($item in @(@('Keyboard Controller','main.ahk'), @('Setup','tools\setup.ahk'), @('Recover','recover.ahk'))) {

@@ -1,142 +1,119 @@
 # keyboard-controller
 
-WindowsノートPCの上に外付けキーボードを置いて使うための、AutoHotkey v2製キーボードコントローラーです。指定した外付けHIDがWindows上で現在存在すると判定できる間だけ、内蔵キーボードの入力を遮断します。内蔵デバイス自体は無効化せず、切断・エラー・終了時はフィルタ解除を試みます。
+ノートPCの上に外付けキーボードを置いて使うためのコントローラーです。指定した外付けキーボードが接続中と判断できる間だけ、選択した内蔵キーボードの入力を遮断します。切断・不明・エラー・終了時は解放します。
 
-Interceptionを使ってキーボード単位で入力を扱うため、外付けキーボード、マウス、タッチパッドは通常どおり使えます。
+| OS | CPU | 実装・操作 | 初回に必要なこと |
+| --- | --- | --- | --- |
+| Windows 11 | x64 | AutoHotkey v2＋Interception、操作パネル | ドライバ導入の管理者承認と再起動 |
+| Linux | x64 / arm64 | evdev、端末とアプリ一覧のランチャー | 選択したキーボードへのアクセス許可 |
+| macOS 13以降 | Apple Silicon / Intel | IOHID、端末とApplications内のランチャー | 入力監視の許可と遮断時の管理者認証 |
 
-## 内蔵キーボードを遮断する条件
-
-次の4条件がそろった場合だけ `BLOCKED` になります。
-
-1. モードが `AUTO`
-2. 設定した外付けキーボードを現在接続中と判定できる
-3. 一時解除の時間外である
-4. コントローラーが正常に動作している
-
-それ以外は `PASS` です。接続状態を取得できない、内蔵キーボードを一意に特定できない、Interceptionの初期化に失敗した、といった場合も遮断しません。
-
-| モード | 外付け接続 | 内蔵キーボード |
-| --- | --- | --- |
-| `AUTO` | 接続中 | `BLOCKED` |
-| `AUTO` | 未接続・不明 | `PASS` |
-| `AUTO`＋一時解除中 | 任意 | `PASS` |
-| `FORCED_ON` | 任意 | `PASS` |
-| `FAULT` | 任意 | Interceptionコンテキストを破棄。失敗時は `UNKNOWN` |
-
-`PASS` は、このコントローラーがInterceptionの遮断コンテキストを保持していない状態です。物理キー入力がWindowsまで届いたことを独立に確認した意味ではありません。
+Linux・macOSの利用者にGoやPythonのインストールは不要です。CIはWindows、Linuxの両CPU、macOSの両CPUで実行します。**macOSの物理キーボードを遮断・解放する実機試験は未実施**です。検証範囲は後述します。
 
 ## 導入
 
-必要なものは次の3つです。
+### Windows
 
-- Windows 11。現時点で実機確認しているOSです
-- AutoHotkey v2 64-bit
-- [Interception](https://github.com/oblitum/Interception)
+1. [Releases](https://github.com/iiinno/keyboard-controller/releases)のWindows ZIPを展開し、`install.cmd` を開く
+2. 初回セットアップでドライバ導入を選び、管理者承認・再起動を行う
+3. スタートメニューの **Keyboard Controller → Setup** を開き、外付けの抜き差しに沿って①②③を押す
+4. 8秒テストで入力と復旧を確認し、常駐を開始する
 
-Interceptionのバイナリはこのリポジトリに含めていません。公式リリースから64-bit版 `interception.dll` を `lib\interception.dll` に配置し、ドライバをインストールして再起動してください。
+AutoHotkeyとInterceptionは公式配布物から自動取得し、固定のSHA-256で照合します。IDの手入力やDLLの手動配置は不要です。既存の `config.ini` とログは保持し、セットアップでIDを変更する場合は設定を `.bak` に退避します。
 
-その後は次の順で進めます。
+ソースから試す場合は、リポジトリ直下の `install.cmd` を使えます。詳細と従来の手動導入は [docs/setup.md](docs/setup.md) を参照してください。Windows ARM64はInterceptionドライバの対象外です。
 
-```text
-1. config.example.ini を config.ini にコピー
-2. tools\list-devices.ahk で内蔵・外付けキーボードのIDを確認
-3. config.ini の internal_keyboard.match / external_keyboard.match を設定
-4. tools\block-test.ahk で8秒間の遮断と自動解除を確認
-5. main.ahk を起動
+### Linux・macOS
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iiinno/keyboard-controller/main/install.sh | sh
 ```
 
-詳しい手順は [`docs/setup.md`](docs/setup.md) にあります。
+OS・CPUに合う配布物をSHA-256照合付きで取得し、内蔵・外付けを一覧から選びます。続いて `permissions --apply` でOSの許可を設定し、8秒テストを実行します。ランチャーから起動でき、端末で `on`、`auto`、`pause 5`、`pause 15`、`quit` を使えます。
 
-## 設定
+macOSのランチャーは管理者認証を表示します。Linuxの自動権限設定はudev・logind環境向けで、対象の内蔵キーボードに限定します。詳細は [docs/cross-platform.md](docs/cross-platform.md) を参照してください。
 
-`config.ini` は端末ごとの設定なのでGit管理しません。最初に `config.example.ini` をコピーして作成します。
+**初回Releaseの公開前やPRのプレビュー**では、Actionsの `package-*` Artifactを使ってください。Linux・macOSは展開したArtifactに対して `sh install.sh --from DIR`、WindowsはArtifact内のZIPを展開して `install.cmd` で試せます。公開されていないReleaseを前提に成功扱いにはしません。
 
-```ini
-[internal_keyboard]
-match=LEN0071
-exclude=046D,B372
+## 遮断する条件
 
-[external_keyboard]
-match=_DEV_VID&02046D_PID&B372_,VID_046D&PID_B372
-```
+次のすべてがそろう間だけ遮断します。
 
-上は実機検証に使った例です。別の機種では `tools\list-devices.ahk` の出力から値を選んでください。
+1. `AUTO` である
+2. 設定した外付けの存在を確認できる
+3. 一時解除・起動直後・復帰直後の待機中ではない
+4. 内蔵を一意に識別でき、制御処理が正常である
 
-`internal_keyboard.match` に一致するInterceptionキーボードが1台でなければ遮断しません。`exclude` は外付けキーボードを内蔵と誤認しないための追加条件です。`external_keyboard.match` はPnP上の存在を見ており、実際にキー入力できることまでは保証しません。USBレシーバーがキーボード本体の電源断後も残る機種では、AUTO判定にそのレシーバーIDを使わないでください。
+マウスを含む複合デバイスや識別の曖昧さを推測で補いません。外付け・マウス・タッチパッドの入力をこのコントローラーで読み捨てることはしません。
 
-主なタイミング設定は次のとおりです。
+`PASS` は、このコントローラーが遮断用のコンテキストを保持していない状態です。実際に物理キー入力がOSまで届いたことを測定した表示ではありません。
 
-| キー | 既定値 | 用途 |
-| --- | ---: | --- |
-| `poll_ms` | 1000 | 外付けHIDの存在確認間隔 |
-| `settle_ms` | 3000 | 起動・復帰後にデバイス列挙が落ち着くまで待つ時間 |
-| `drain_ms` | 10 | 遮断中の内蔵キーボード入力を読み捨てる間隔 |
-| `resume_gap_factor` | 3 | 電源イベントを取り逃した場合に復帰とみなす補助判定 |
+## Windowsの操作パネル
 
-## モードを切り替える
-
-トレイアイコンを左クリックまたは右クリックすると操作パネルを開きます。`AUTOに戻す` と `内蔵キーボードを常にON`（`FORCED_ON`）を切り替えられます。パネルは開いたままでも接続監視を続け、×またはEscで閉じても常駐は続きます。
-
-`5分だけON`／`15分だけON` は内蔵キーボードを一時的に使いたいときの操作です。残り時間を表示し、終了後は現在の外付け接続状態を確認してAUTOの判定に戻ります。エラー状態や起動・復帰後の待機中には再遮断しません。AUTOまたは常にONを選ぶと一時解除を取り消します。一時解除は再起動後には引き継ぎません。終了の判定は `poll_ms` ごとに行います。
+トレイアイコンを左右どちらかでクリックすると開きます。パネルを開いたままでも切断監視を続け、×またはEscで閉じるとパネルだけを非表示にします。
 
 ![一時解除付き操作パネル](docs/control-panel.png)
 
-`toggle_hotkey` は通常のAutoHotkeyホットキー用です。Logi Options+などのデバイスアプリでは、**「アプリケーション／ファイルを開く」から `tools/toggle.ahk`（またはこのスクリプトを起動するショートカット）を実行**できます。キーの送信は不要です。ランチャーは常駐中の `main.ahk` にWindowsメッセージを送るだけで、要求ファイルは作りません。
+- **AUTOに戻す**: 現在の外付け接続状態で再判定
+- **内蔵キーボードを常にON**: `FORCED_ON` に切替
+- **5分だけON／15分だけON**: 一時解除。終了後は現在の接続状態を確認してAUTOへ戻る
+- **デバイス再検出／ログを開く／常駐を終了**: 診断と終了
 
-## 内蔵キーボードが戻らない場合
+AUTOまたは常にONを選ぶと一時解除を取り消します。一時解除は再起動後には引き継ぎません。状態の再評価は `poll_ms` ごとです。
 
-次の順で復旧します。
+`toggle_hotkey` による切替も使えます。Logi Options+などでは「アプリケーション／ファイルを開く」で `tools/toggle.ahk` を指定できます。キーストロークの送信は不要です。
 
-1. 外付けキーボードの電源を切るか、Bluetoothを切断する
-2. マウスまたはタッチパッドから `recover.ahk` を実行する
-3. 改善しなければWindowsを再起動する
+## Windowsの設定
 
-コントローラーから解除できない場合はWindows再起動を復旧手段にします。再起動後も、実際に内蔵キーボードから入力できることを確認してください。
+`config.ini` はセットアップで作成します。手動設定する場合は `config.example.ini` をコピーしてください。端末ごとのIDを含むためGit管理しません。
 
-## ファイル構成
+| 設定 | 既定値 | 用途 |
+| --- | ---: | --- |
+| `poll_ms` | 1000 | 外付けの存在確認間隔 |
+| `settle_ms` | 3000 | 起動・復帰後に待つ時間 |
+| `drain_ms` | 10 | 遮断中の入力を読み捨てる間隔 |
+| `resume_gap_factor` | 3 | 復帰の補助判定 |
 
-```text
-keyboard-controller/
-├─ main.ahk                 常駐コントローラー
-├─ recover.ahk              緊急復旧
-├─ config.example.ini       公開用の設定例
-├─ lib/
-│  ├─ Config.ahk            設定読み込みと検証
-│  ├─ Devices.ahk           内蔵・外付けキーボードの判定
-│  ├─ Interception.ahk      Interception APIの薄いラッパー
-│  ├─ Pnp.ahk               現在接続中のPnPデバイス列挙
-│  ├─ ControlPanel.ahk      常駐監視を止めない操作パネル
-│  ├─ Policy.ahk            状態判定と一時解除の残り時間
-│  └─ Wide.ahk              UTF-16マルチ文字列の読み取り
-├─ tools/
-│  ├─ block-test.ahk        8秒だけ遮断する安全確認
-│  ├─ key-tester.ahk        ホットキー候補の確認
-│  ├─ list-devices.ahk      デバイスIDの確認
-│  └─ toggle.ahk            外付けキーボード用の切替ランチャー
-└─ docs/
-   ├─ setup.md              導入と確認手順
-   └─ validation.md         実機で確認した範囲
-```
+`internal_keyboard.match` に一致するInterceptionキーボードが1台でなければ遮断しません。`exclude` は候補から除く追加条件です。手動設定の診断には `tools/list-devices.ahk` を使えます。
 
-実行時には `config.ini`、`logs\`、`lib\interception.dll` が必要または生成されますが、いずれもGit管理の対象外です。
+## 復旧
 
-## 実機で確認した範囲
+Windowsでは、外付けを切断し、マウスまたはタッチパッドからスタートメニューの **Recover** または `recover.ahk` を実行します。
 
-2026年10月17日にWindows 11、AutoHotkey v2、Lenovo ThinkPadの内蔵キーボードとLogitech Bluetoothキーボードで確認しています。内蔵キーボードだけの遮断、解除、18秒間のBLOCK維持、正常終了時のPASS復帰、モード切替まで実機ログで確認済みです。
+Linux・macOSでは、常駐している端末をマウスから閉じるか、Ctrl+C／`quit` で終了します。起動時に表示したPIDへ終了シグナルを送る方法もあります。
 
-詳細と未確認項目は [`docs/validation.md`](docs/validation.md) に分けています。
+改善しなければOSを再起動し、内蔵から実際に入力できることを確認してください。
+
+## 検証
+
+- Windows: 実行スクリプトの構文、設定、対象の一意性、マウス除外、解除失敗・再試行、ネイティブGUIの操作とタイマー継続を自動検証
+- Windows導入: 標準PowerShell 5.1、依存の照合・配置、設定保持、使用中ファイルの更新拒否、初回ウィンドウ表示を検証
+- Linux・macOS: 各CPU上でネイティブビルド、競合検査、状態遷移、実APIの読み取り専用列挙、パッケージからの導入、改変パッケージの拒否を検証
+- Linux: 隔離した仮想キーボードで実際のEVIOCGRAB、内蔵側だけの入力抑止、外付けへの非干渉、解放後の復帰を検証
+
+macOSの物理入力、個々の機種の複合デバイス構成、実際のスリープ復帰は上記CIだけでは保証できません。Windowsの従来の実機記録と検証手順は [docs/validation.md](docs/validation.md) にあります。
 
 ## 制約
 
-- Interceptionドライバの導入には管理者権限と再起動が必要です
-- 内蔵キーボードの特定はハードウェアIDの部分一致なので、端末ごとに設定が必要です
-- 遮断中は内蔵キーボードの入力を読み捨てます。遮断開始時にすでに押していたキーのキーアップも捨てられる可能性があり、特にCtrl・Alt・Shiftなどの修飾キーはOS側で押下状態が残ることがあります。AUTOへ移るときは内蔵キーボードのキーを押したままにしないでください
-- 制御プロセスを強制終了した場合のドライバ挙動はInterception側に依存します。`recover.ahk` と再起動を復旧手段として残しています
-- AutoHotkeyの通常ホットキーだけでは、同じキーがどの物理キーボードから来たかを区別できません
+- 存在検知は「実際に入力できる」ことの証明ではありません。本体の電源断後もUSBレシーバーが残る構成はAUTOの根拠にしないでください
+- 遮断開始時に押していたキーのキーアップを捨てる可能性があります。切替時に内蔵のCtrl・Alt・Shiftなどを押しっぱなしにしないでください
+- 他のキーボード制御ソフトがデバイスを独占している場合は取得に失敗します
+- Linux・macOSのUIは端末です。Windowsの操作パネルと同じGUIを提供するものではありません
 
-## ライセンス
+## 主なファイル
 
-このリポジトリのコードはMIT Licenseです。
+| パス | 用途 |
+| --- | --- |
+| `main.ahk` / `recover.ahk` | Windowsの常駐・復旧 |
+| `tools/setup.ahk` | Windowsの抜き差し式セットアップ |
+| `lib/` | Windowsの設定・識別・API・操作パネル |
+| `portable/` | Linux・macOSの制御、CLI、ネイティブバックエンド |
+| `install.cmd` / `install.ps1` / `install.sh` | OS別の導入 |
+| `scripts/` | 配布パッケージの作成 |
+| `tests/` / `.github/workflows/` | 自動検証・配布 |
 
-Interceptionは別ライセンスの外部依存です。バイナリやドライバはこのリポジトリに含めていません。利用条件は公式リポジトリと [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) を確認してください。
+## ライセンス・配布
 
+このリポジトリのコードはMIT Licenseです。InterceptionやAutoHotkeyなど外部依存の条件は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) と各公式配布物を確認してください。InterceptionのバイナリとドライバはソースにもWindows配布ZIPにも含めず、導入時に公式配布物から取得します。
+
+メンテナーが `v0.1.0` のようなバージョンタグをpushすると、5種類のパッケージとチェックサムをビルド・検証後にReleaseへ公開します。PRのCIはArtifact作成までで、Releaseの公開やインストール済みアプリの更新は行いません。

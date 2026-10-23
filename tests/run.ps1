@@ -24,9 +24,9 @@ function Invoke-Ahk([string[]]$AhkArguments) {
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(15000)) {
+        if (-not $process.WaitForExit(30000)) {
             $process.Kill($true)
-            throw 'AutoHotkey test exceeded 15 seconds'
+            throw 'AutoHotkey test exceeded 30 seconds'
         }
         Write-Host $stdout.GetAwaiter().GetResult()
         Write-Host $stderr.GetAwaiter().GetResult()

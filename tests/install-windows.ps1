@@ -12,10 +12,14 @@ try {
     & (Join-Path $root 'scripts\package-windows.ps1')
     $expanded = Join-Path $work 'expanded'
     Expand-Archive -LiteralPath (Join-Path $root 'dist\keyboard-controller-windows-x64.zip') -DestinationPath $expanded
-    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $expanded 'install.ps1'), '-SourceRoot', $expanded, '-InstallDirectory', $target, '-NoLaunch', '-NoShortcuts')
+    $menu = Join-Path $work 'menu with spaces'
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $expanded 'install.ps1'), '-SourceRoot', $expanded, '-InstallDirectory', $target, '-ShortcutDirectory', $menu, '-NoLaunch')
     if ($DownloadCache) { $arguments += @('-DownloadCache', $DownloadCache) }
     & powershell.exe @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 installation failed' }
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut((Join-Path $menu 'Setup.lnk'))
+    if ($shortcut.TargetPath -ne (Join-Path $target '.runtime\AutoHotkey64.exe') -or -not $shortcut.Arguments.Contains('tools\setup.ahk')) { throw 'Incorrect setup shortcut' }
     if ([IO.File]::ReadAllText($config) -ne 'machine-specific configuration') { throw 'Existing config changed' }
     $ahk = Join-Path $target '.runtime\AutoHotkey64.exe'
     if (-not (Test-Path -LiteralPath $ahk) -or -not (Test-Path -LiteralPath (Join-Path $target 'lib\interception.dll'))) { throw 'Missing runtime dependency' }

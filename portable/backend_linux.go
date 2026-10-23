@@ -195,6 +195,12 @@ func (b *linuxBackend) PermissionStatus() string {
 	return "evdev device access required; permissions --apply grants the active local user access to the selected keyboard"
 }
 
+func (b *linuxBackend) Probe(d Device) error {
+    fd,err:=syscall.Open(d.Locator,syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,0)
+    if err!=nil{return err};defer syscall.Close(fd)
+    return checkedFD(fd,d)
+}
+
 func (b *linuxBackend) RequestPermission(cfg Config, apply bool) (string, error) {
 	devices, err := b.Devices()
 	if err != nil {
@@ -234,5 +240,6 @@ func (b *linuxBackend) RequestPermission(cfg Config, apply bool) (string, error)
 			return "", err
 		}
 	}
-	return "Keyboard permission rule installed. Reconnect/re-login if the current seat ACL has not updated.", nil
+	if err=b.Probe(internal);err!=nil{return "Rule installed, but current keyboard access was not confirmed. Reconnect/re-login, then run doctor.",err}
+	return "Keyboard permission rule installed; access to the selected keyboard was verified without grabbing input.", nil
 }

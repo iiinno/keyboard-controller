@@ -99,7 +99,7 @@ SaveSelection(*) {
         WriteSetupConfig(S.Root "\config.ini", S.Root "\config.example.ini", internal, external, Interception.ListKeyboards())
         S.Test.Enabled := true
         S.Start.Enabled := true
-        S.Status.Text := "保存しました。外付けを接続し直して④を実行し、内蔵だけが止まり8秒後に戻ることを確認してください。既存設定はconfig.ini.bakに退避しました。"
+        S.Status.Text := "保存しました。外付けを接続し直して④を実行し、内蔵だけが止まり8秒後に戻ることを確認してください。既存設定があればconfig.ini.bakに退避しています。"
     } catch as setupError {
         S.Status.Text := setupError.Message
     } finally {

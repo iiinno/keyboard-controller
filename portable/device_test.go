@@ -2,11 +2,15 @@ package main
 
 import (
     "bytes"
+    "io"
     "os"
+    "os/exec"
     "path/filepath"
     "runtime"
     "strings"
     "testing"
+    "sync"
+    "time"
 )
 
 func TestConfigRoundTripAndPreservation(t *testing.T) {
@@ -78,4 +82,39 @@ func TestEightSecondTestRequiresExternal(t *testing.T) {
     var out bytes.Buffer
     err:=run(f,c.cfg,strings.NewReader(""),&out,false,true)
     if err==nil||!strings.Contains(err.Error(),"did not start")||f.grabs!=0{t.Fatalf("test without external: %v grabs=%d",err,f.grabs)}
+}
+
+func TestLaunchersEscapePaths(t *testing.T) {
+    homeDir:=t.TempDir()
+    executable:=filepath.Join(homeDir,"with spaces' and $dollar","keyboard-controller")
+    config:=filepath.Join(homeDir,"config%with spaces.json")
+    for _,platform:=range []string{"linux","darwin"}{
+        path,err:=writeLauncher(executable,config,platform,homeDir,"");if err!=nil{t.Fatal(err)}
+        data,err:=os.ReadFile(path);if err!=nil{t.Fatal(err)}
+        if !strings.Contains(string(data),"run --config"){t.Fatal("missing run arguments")}
+        if platform=="darwin"&&!strings.Contains(string(data),shellQuote(executable)){t.Fatal("shell path not quoted")}
+        if platform=="linux"&&!strings.Contains(string(data),"config%%with spaces.json"){t.Fatal("desktop field code not escaped")}
+    }
+    if _,err:=writeLauncher("bad\npath",config,"linux",homeDir,"");err==nil{t.Fatal("newline accepted")}
+    if got:=desktopQuote("$`\\\"");got!=`"\\$\\`+"`"+`\\\\\\""`{t.Fatalf("incorrect Desktop Entry escaping: %q",got)}
+    quoted,err:=exec.Command("sh","-c","printf '%s' "+shellQuote(executable)).Output()
+    if err!=nil||string(quoted)!=executable{t.Fatalf("shell changed launcher path: %q %v",quoted,err)}
+}
+
+type gatedWriter struct {once sync.Once; started,unblock chan struct{}}
+func (w *gatedWriter) Write(data []byte)(int,error){w.once.Do(func(){close(w.started)});<-w.unblock;return len(data),nil}
+
+func TestBlockedOutputCannotPreventRelease(t *testing.T){
+    c,f:=fixture(t);c.cfg.SettleMS=0
+    grabbed:=make(chan struct{});f.onGrab=func(){close(grabbed)}
+    writer:=&gatedWriter{started:make(chan struct{}),unblock:make(chan struct{})}
+    defer close(writer.unblock)
+    input,commands:=io.Pipe();defer input.Close();defer commands.Close()
+    done:=make(chan error,1)
+    go func(){done<-run(f,c.cfg,input,writer,false,false)}()
+    select{case <-writer.started:case <-time.After(2*time.Second):t.Fatal("output did not start")}
+    select{case <-grabbed:case <-time.After(2*time.Second):t.Fatal("blocked output stalled controller")}
+    if _,err:=io.WriteString(commands,"quit\n");err!=nil{t.Fatal(err)}
+    select{case err:=<-done:if err!=nil{t.Fatal(err)};case <-time.After(2*time.Second):t.Fatal("blocked output prevented shutdown")}
+    if f.grabbed!=""||f.releases!=1{t.Fatal("keyboard was not released")}
 }

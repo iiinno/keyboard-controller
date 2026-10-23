@@ -13,6 +13,7 @@ type fakeBackend struct {
 	listErr, grabErr, releaseErr error
 	grabbed                      string
 	grabs, releases              int
+	onGrab                       func()
 }
 
 func (f *fakeBackend) Devices() ([]Device, error) { return f.devices, f.listErr }
@@ -22,6 +23,7 @@ func (f *fakeBackend) Grab(d Device) error {
 	}
 	f.grabbed = d.Locator
 	f.grabs++
+	if f.onGrab != nil { f.onGrab() }
 	return nil
 }
 func (f *fakeBackend) Release() error {

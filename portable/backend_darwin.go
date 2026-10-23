@@ -103,6 +103,11 @@ func (b *darwinBackend) PermissionStatus() string {
 		return "Input Monitoring not yet granted; run permissions --apply"
 	}
 }
+func (b *darwinBackend) Probe(_ Device) error {
+    if C.kc_permission()!=0{return errors.New(b.PermissionStatus())}
+    if os.Geteuid()!=0{return errors.New("blocking requires administrator privileges; use the generated launcher")}
+    return nil
+}
 func (b *darwinBackend) RequestPermission(_ Config, apply bool) (string, error) {
 	if apply {
 		C.kc_request_permission()

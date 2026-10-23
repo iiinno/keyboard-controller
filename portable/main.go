@@ -93,7 +93,14 @@ func entry(args []string, input io.Reader, out io.Writer) error {
 			printDevices(out, devices)
 			return nil
 		}
-		return setup(input, out, devices, *configPath, *replace)
+		if err = setup(input, out, devices, *configPath, *replace); err != nil { return err }
+		executable, exeErr := os.Executable()
+		homeDir, homeErr := os.UserHomeDir()
+		if exeErr == nil && homeErr == nil {
+			launcher, launcherErr := writeLauncher(executable, *configPath, runtime.GOOS, homeDir, os.Getenv("XDG_DATA_HOME"))
+			if launcherErr == nil { fmt.Fprintln(out, "Launcher:", launcher) } else { fmt.Fprintln(out, "Config saved; launcher could not be created:", launcherErr) }
+		}
+		return nil
 	}
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
@@ -108,12 +115,14 @@ func entry(args []string, input io.Reader, out io.Writer) error {
 		devices, listErr := b.Devices()
 		internal, internalErr := uniqueDevice(devices, cfg.InternalID, true)
 		external, externalErr := uniqueDevice(devices, cfg.ExternalID, false)
+		var permissionErr error
+		if internalErr==nil {if prober,ok:=b.(interface{Probe(Device)error});ok{permissionErr=prober.Probe(internal)}}
 		result := map[string]any{"platform": runtime.GOOS, "permission": b.PermissionStatus(), "devices": devices,
-			"internal": internal, "external": external, "enumeration_error": errorText(listErr), "internal_error": errorText(internalErr), "external_error": errorText(externalErr)}
+			"internal": internal, "external": external, "enumeration_error": errorText(listErr), "internal_error": errorText(internalErr), "external_error": errorText(externalErr), "permission_error":errorText(permissionErr)}
 		if *asJSON {
 			return json.NewEncoder(out).Encode(result)
 		}
-		for _, key := range []string{"platform", "permission", "enumeration_error", "internal_error", "external_error"} {
+		for _, key := range []string{"platform", "permission", "enumeration_error", "internal_error", "external_error", "permission_error"} {
 			fmt.Fprintf(out, "%s: %v\n", key, result[key])
 		}
 		return nil
@@ -178,7 +187,12 @@ func setup(input io.Reader, out io.Writer, devices []Device, path string, replac
 	if err = saveConfig(path, cfg, replace); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Saved %s\nNext: keyboard-controller permissions --apply\nThen: keyboard-controller test\nFinally: keyboard-controller run\n", path)
+	fmt.Fprintf(out, "Saved %s\nNext: keyboard-controller permissions --apply\n", path)
+	executable, exeErr := os.Executable()
+	if exeErr != nil { executable = "keyboard-controller" }
+	if runtime.GOOS == "darwin" {
+		fmt.Fprintf(out, "Then: sudo %s test --config %s\nFinally: use the launcher or sudo %s run --config %s\n", shellQuote(executable), shellQuote(path), shellQuote(executable), shellQuote(path))
+	} else { fmt.Fprintf(out, "Then: %s test\nFinally: use the launcher or %s run\n", shellQuote(executable), shellQuote(executable)) }
 	return nil
 }
 
@@ -187,7 +201,6 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 	if err != nil {
 		return err
 	}
-	defer func() { result = errors.Join(result, c.Close()) }()
 	if pass {
 		if err = c.SetMode("FORCED_ON"); err != nil {
 			return err
@@ -196,15 +209,30 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 	if test {
 		c.settleUntil = b.NowMS()
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 	defer stop()
 	if test {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 	}
+	// A stalled terminal/pipe must never stall keyboard release or connection checks.
+	messages := make(chan string, 16)
+	writerDone := make(chan struct{})
+	emit := func(text string) { select { case messages <- text: default: } }
+	go func() {
+		defer close(writerDone)
+		for text := range messages { if _, writeErr := fmt.Fprintln(out, text); writeErr != nil { stop(); return } }
+	}()
+	defer func() {
+		releaseErr:=c.Close();result=errors.Join(result,releaseErr)
+		if releaseErr==nil{emit("PASS (controller stopped; input context released)")}
+		close(messages)
+		select{case <-writerDone:case <-time.After(100*time.Millisecond):}
+	}()
 	commands := make(chan string, 1)
 	if !test {
+		emit(fmt.Sprintf("Controller PID: %d", os.Getpid()))
 		go func() {
 			scanner := bufio.NewScanner(input)
 			for scanner.Scan() {
@@ -215,7 +243,7 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 				}
 			}
 		}()
-		fmt.Fprintln(out, "Commands: on | auto | pause 5 | pause 15 | status | quit; Ctrl+C releases and exits")
+		emit("Commands: on | auto | pause 5 | pause 15 | status | quit; Ctrl+C releases and exits")
 	}
 	previous := ""
 	testStarted := false
@@ -238,7 +266,7 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 			case "status":
 				previous = ""
 			default:
-				fmt.Fprintln(out, "Unknown command; use on, auto, pause 5, pause 15, status, or quit")
+				emit("Unknown command; use on, auto, pause 5, pause 15, status, or quit")
 			}
 			if err != nil {
 				return err
@@ -254,7 +282,7 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 		}
 		status := fmt.Sprintf("%s mode=%s (%s)", c.State, c.Mode, c.Reason)
 		if status != previous {
-			fmt.Fprintln(out, status)
+			emit(status)
 			previous = status
 		}
 		if err = b.Pump(10 * time.Millisecond); err != nil {

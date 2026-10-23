@@ -2,6 +2,7 @@ name: Linux and macOS
 
 on:
   pull_request:
+  workflow_call:
   push:
     branches: [main]
 
@@ -19,6 +20,8 @@ jobs:
     defaults:
       run:
         working-directory: portable
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
