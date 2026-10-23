@@ -23,7 +23,9 @@ func (f *fakeBackend) Grab(d Device) error {
 	}
 	f.grabbed = d.Locator
 	f.grabs++
-	if f.onGrab != nil { f.onGrab() }
+	if f.onGrab != nil {
+		f.onGrab()
+	}
 	return nil
 }
 func (f *fakeBackend) Release() error {

@@ -1,6 +1,29 @@
 #Requires -Version 7.0
 param([string]$DownloadCache = '')
 $ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class SetupWindowFinder {
+    private delegate bool EnumProc(IntPtr hwnd, IntPtr data);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr data);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder title, int count);
+    public static IntPtr Find(uint pid, string expectedTitle) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((hwnd, data) => {
+            uint owner; GetWindowThreadProcessId(hwnd, out owner);
+            if (owner != pid || !IsWindowVisible(hwnd)) return true;
+            var title = new StringBuilder(256); GetWindowText(hwnd, title, title.Capacity);
+            if (title.ToString() != expectedTitle) return true;
+            found = hwnd; return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+'@
 $root = Split-Path -Parent $PSScriptRoot
 $work = Join-Path ([IO.Path]::GetTempPath()) ('keyboard-controller-install-test-' + [guid]::NewGuid())
 $target = Join-Path $work 'program with spaces'
@@ -37,10 +60,14 @@ try {
     # Launch only the setup UI. Its startup path never opens/grabs a keyboard.
     $process = Start-Process -FilePath $ahk -ArgumentList ('"' + (Join-Path $target 'tools\setup.ahk') + '"') -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
-    do { Start-Sleep -Milliseconds 50; $process.Refresh() } while (-not $process.MainWindowHandle -and -not $process.HasExited -and [DateTime]::UtcNow -lt $deadline)
-    if (-not $process.MainWindowHandle) { throw 'Setup window did not open' }
+    do {
+        $setupWindow = [SetupWindowFinder]::Find($process.Id, 'keyboard-controller 初回セットアップ')
+        if ($setupWindow -ne [IntPtr]::Zero -or $process.HasExited) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($setupWindow -eq [IntPtr]::Zero) { throw 'Setup window did not open' }
     $preview = Join-Path $work 'wizard.png'
-    & (Join-Path $PSScriptRoot 'capture-panel.ps1') -WindowHandle $process.MainWindowHandle -OutputPath $preview
+    & (Join-Path $PSScriptRoot 'capture-panel.ps1') -WindowHandle $setupWindow.ToInt64() -OutputPath $preview
     Write-Host ('WIZARD_PREVIEW_BASE64:' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($preview)))
     Write-Host 'PASS: Windows package, verified dependency download, config preservation, locked-update rejection, and native setup UI'
 } finally {

@@ -33,7 +33,7 @@ OS・CPUに合う配布物をSHA-256照合付きで取得し、内蔵・外付�
 
 macOSのランチャーは管理者認証を表示します。Linuxの自動権限設定はudev・logind環境向けで、対象の内蔵キーボードに限定します。詳細は [docs/cross-platform.md](docs/cross-platform.md) を参照してください。
 
-**初回Releaseの公開前やPRのプレビュー**では、Actionsの `package-*` Artifactを使ってください。Linux・macOSは展開したArtifactに対して `sh install.sh --from DIR`、WindowsはArtifact内のZIPを展開して `install.cmd` で試せます。公開されていないReleaseを前提に成功扱いにはしません。
+**初回Releaseの公開前やPRのプレビュー**では、Actionsの `package-*` Artifactを使ってください。Linux・macOSはArtifactを展開したディレクトリで `sh install.sh --from .`、WindowsはArtifact内のZIPを展開して `install.cmd` で試せます。
 
 ## 遮断する条件
 

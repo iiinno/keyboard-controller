@@ -23,10 +23,10 @@ curl -fsSL https://raw.githubusercontent.com/iiinno/keyboard-controller/main/ins
 
 配布物のSHA-256を照合し、既定では `~/.local/bin/keyboard-controller` に配置します。初回は内蔵・外付けを一覧から番号で選びます。既存設定は保持します。`--prefix DIR` で配置先を変更できます。
 
-**初回Releaseの公開前やPRの確認時**は、GitHub Actionsの `package-*` Artifactをダウンロード・展開し、リポジトリのインストーラーから使えます。未公開のReleaseがあるようには扱いません。
+**初回Releaseの公開前やPRの確認時**は、GitHub Actionsの `package-*` Artifactをダウンロード・展開し、同梱のインストーラーを使えます。展開したディレクトリで次を実行します。
 
 ```sh
-sh install.sh --from /path/to/extracted-artifact
+sh install.sh --from .
 ```
 
 標準入力が端末ではない環境では、インストール後に次を実行してください。
