@@ -1,0 +1,31 @@
+name: AutoHotkey tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download pinned AutoHotkey
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'AutoHotkey.zip'
+          Invoke-WebRequest 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.30/AutoHotkey_2.0.30.zip' -OutFile $zip
+          $expected = '1E0ECE7ECB2D5646E55758150472677996A57F9DB5C83D2996D8B47B9E2F31A4'
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $expected) {
+            throw 'AutoHotkey archive SHA-256 mismatch'
+          }
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP 'AutoHotkey')
+      - name: Validate scripts and run driver-free regression tests
+        shell: pwsh
+        run: ./tests/run.ps1 -AutoHotkey "$env:RUNNER_TEMP\AutoHotkey\AutoHotkey64.exe"

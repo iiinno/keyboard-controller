@@ -40,3 +40,16 @@
 - 次回ログオン時にタスクスケジューラから自動起動すること
 
 強制終了時の解放はドライバ実装をソースから確認できないため、`recover.ahk` とWindows再起動を復旧経路として残しています。
+
+## 自動テスト
+
+WindowsとPowerShell 7で次を実行できます。AutoHotkeyのパスは環境に合わせて変更してください。
+
+```powershell
+pwsh -File .\tests\run.ps1 -AutoHotkey 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe'
+```
+
+実行スクリプトの構文検証、設定の検証、デバイス候補の一意性と除外優先、マウススロットの除外、UTF-16文字列の読み取り、遮断テストでの解除失敗と再試行を確認します。InterceptionのDLL・ドライバ・接続キーボードは不要です。`block-test.ahk` 全体は実行せず、解除関数だけを取り出して偽のAPIで検証します。
+
+同じテストをGitHub Actionsでも実行します。これらは物理入力の遮断・復旧やスリープ復帰の実機確認を代替しません。
+
