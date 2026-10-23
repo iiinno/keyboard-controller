@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0 64-bit
 ; A second copy would hold a second block. Force replaces the first instead.
 #SingleInstance Force
+; A native tray menu pauses SetTimer and could extend the eight-second block.
+#NoTrayIcon
 
 ; A modal warning dialog would freeze this test while it holds a block, which is the
 ; one moment it must not stall. This directive must come before the includes so that

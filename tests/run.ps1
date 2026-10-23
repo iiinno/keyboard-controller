@@ -54,6 +54,23 @@ try {
     $releasePath = Join-Path $tempDir 'Release.ahk'
     [IO.File]::WriteAllText($releasePath, $release[0].Value, [Text.UTF8Encoding]::new($false))
     Invoke-Ahk @('/include', $releasePath, (Join-Path $PSScriptRoot 'block-test-release.ahk'))
+
+    # Include controller functions without startup, logging, or driver actuation.
+    $controller = Get-Content -LiteralPath (Join-Path $repoRoot 'main.ahk') -Raw
+    $names = @('Reconcile', 'PollTick', 'HandleResume', 'OnPowerBroadcast',
+        'ToggleMode', 'OnToggleRequest', 'SetMode', 'TemporarilyEnable',
+        'RefreshNow', 'BuildTray', 'OnTrayIcon', 'UpdateTray')
+    $functions = foreach ($name in $names) {
+        $matches = [regex]::Matches($controller, "(?ms)^$name\([^\r\n]*\) \{\r?\n.*?^\}")
+        if ($matches.Count -ne 1) { throw "Expected exactly one top-level $name() function" }
+        $matches[0].Value
+    }
+    $controllerPath = Join-Path $tempDir 'Controller.ahk'
+    [IO.File]::WriteAllText($controllerPath, ($functions -join "`n`n"), [Text.UTF8Encoding]::new($false))
+    $previewPath = Join-Path $tempDir 'panel.png'
+    Invoke-Ahk @('/include', $controllerPath, (Join-Path $PSScriptRoot 'controller.ahk'), $previewPath)
+    if (-not (Test-Path -LiteralPath $previewPath)) { throw 'Native panel preview was not captured' }
+    Write-Host ('PANEL_PREVIEW_BASE64:' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($previewPath)))
 } finally {
     Remove-Item -LiteralPath $tempDir -Recurse -Force
 }
