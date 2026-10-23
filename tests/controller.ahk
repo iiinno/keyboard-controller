@@ -144,7 +144,8 @@ TestPanel() {
     ; A real tray notification must show a modeless panel and return, rather than
     ; entering AutoHotkey's modal tray menu. No mouse or keyboard input is sent.
     OnMessage(0x404, OnTrayIcon)
-    PostMessage(0x404, 0, 0x205, , "ahk_id " A_ScriptHwnd)
+    AssertEqual(DllCall("PostMessageW", "ptr", A_ScriptHwnd, "uint", 0x404
+        , "uptr", 0, "ptr", 0x205, "int"), 1, "post notification to hidden script window")
     Sleep(50)
     hwnd := G.Panel.Window.Hwnd
     AssertEqual(DllCall("IsWindowVisible", "ptr", hwnd, "int"), 1, "right tray click opens panel")
@@ -180,7 +181,7 @@ TestPanel() {
             AssertEqual(RunWait(command, , "Hide"), 0, "capture actual native panel")
         }
         ticks := HeartbeatCount
-        PostMessage(0x10, 0, 0, , "ahk_id " hwnd)
+        DllCall("PostMessageW", "ptr", hwnd, "uint", 0x10, "uptr", 0, "ptr", 0, "int")
         Sleep(50)
         AssertEqual(DllCall("IsWindowVisible", "ptr", hwnd, "int"), 0, "close hides panel")
         AssertEqual(HeartbeatCount > ticks, true, "closing panel keeps timers running")
