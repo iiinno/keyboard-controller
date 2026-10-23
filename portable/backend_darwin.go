@@ -12,6 +12,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 	"unsafe"
@@ -57,6 +58,9 @@ func (b *darwinBackend) Grab(d Device) error {
 	raw, ok := b.devices[d.Locator]
 	if !ok || !d.Blockable || macDevice(raw).ID != d.ID {
 		return errors.New("keyboard identity changed; refusing to seize")
+	}
+	if os.Geteuid() != 0 {
+		return errors.New("macOS requires administrator privileges to seize a keyboard; run with sudo and an explicit --config path")
 	}
 	result := C.kc_grab(raw, &b.handle)
 	if result != 0 {

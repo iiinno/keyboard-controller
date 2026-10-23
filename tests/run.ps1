@@ -45,6 +45,7 @@ try {
         Invoke-Ahk @('/Validate', (Join-Path $repoRoot $entry))
     }
     Invoke-Ahk @((Join-Path $PSScriptRoot 'unit.ahk'))
+    Invoke-Ahk @((Join-Path $PSScriptRoot 'setup.ahk'))
 
     # Extract just the production Release() body. Including the whole tool would
     # run its top-level keyboard-blocking code, which must never happen in CI.

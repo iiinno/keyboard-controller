@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 var version = "dev"
@@ -136,7 +137,8 @@ func printDevices(out io.Writer, devices []Device) {
 		if !d.Blockable {
 			hint += " [cannot safely block]"
 		}
-		fmt.Fprintf(out, "%d. %s%s\n   %s\n", i+1, d.Name, hint, d.ID)
+		name := strings.Map(func(r rune) rune { if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) { return ' ' }; return r }, d.Name)
+		fmt.Fprintf(out, "%d. %s%s\n   %s\n", i+1, name, hint, d.ID)
 	}
 }
 
@@ -216,6 +218,7 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 		fmt.Fprintln(out, "Commands: on | auto | pause 5 | pause 15 | status | quit; Ctrl+C releases and exits")
 	}
 	previous := ""
+	testStarted := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -244,6 +247,10 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 		}
 		if err = c.Tick(); err != nil {
 			return err
+		}
+		if test && !testStarted {
+			if c.State != "BLOCKED" { return fmt.Errorf("8-second test did not start: %s", c.Reason) }
+			testStarted = true
 		}
 		status := fmt.Sprintf("%s mode=%s (%s)", c.State, c.Mode, c.Reason)
 		if status != previous {

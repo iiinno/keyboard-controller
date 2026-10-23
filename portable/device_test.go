@@ -72,3 +72,10 @@ func TestRunQuitReleases(t *testing.T) {
     if err:=run(f,c.cfg,strings.NewReader("status\non\nauto\npause 5\npause 15\nquit\n"),&out,false,false);err!=nil{t.Fatal(err)}
     if f.grabbed!=""{t.Fatal("run returned holding a grab")}
 }
+
+func TestEightSecondTestRequiresExternal(t *testing.T) {
+    c,f:=fixture(t);f.devices=f.devices[:1]
+    var out bytes.Buffer
+    err:=run(f,c.cfg,strings.NewReader(""),&out,false,true)
+    if err==nil||!strings.Contains(err.Error(),"did not start")||f.grabs!=0{t.Fatalf("test without external: %v grabs=%d",err,f.grabs)}
+}

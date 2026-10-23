@@ -72,4 +72,10 @@ elif [ "$setup" = yes ]; then
     elif ( : < /dev/tty ) 2>/dev/null; then "$target" setup < /dev/tty
     else printf 'Run "%s" setup in a terminal to choose your keyboards.\n' "$target"; fi
 fi
-printf 'Next: "%s" permissions --apply\nThen: "%s" test\nStart: "%s" run\n' "$target" "$target" "$target"
+printf 'Next: "%s" permissions --apply\n' "$target"
+if [ "$platform" = darwin ]; then
+    printf 'Test: sudo "%s" test --config "%s/keyboard-controller/config.json"\n' "$target" "$config_dir"
+    printf 'Start: sudo "%s" run --config "%s/keyboard-controller/config.json"\n' "$target" "$config_dir"
+else
+    printf 'Then: "%s" test\nStart: "%s" run\n' "$target" "$target"
+fi

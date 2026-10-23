@@ -45,6 +45,11 @@ jobs:
           go build -trimpath -o keyboard-controller .
           ./keyboard-controller version
           ./keyboard-controller devices --json
+      - name: Verify real evdev grabbing using isolated virtual keyboards
+        if: runner.os == 'Linux'
+        run: |
+          sudo modprobe uinput
+          sudo env KEYBOARD_CONTROLLER_UINPUT=1 CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/root-go-cache" "$(command -v go)" test -run '^TestLinuxUinput' -v ./...
       - name: Package and verify installation
         run: |
           sh ../scripts/package-unix.sh
