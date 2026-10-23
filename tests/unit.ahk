@@ -5,6 +5,10 @@
 #Include assert.ahk
 #Include ..\lib\Devices.ahk
 
+; Even a regression in BlockDevice's bounds check must not reach a real driver
+; when someone runs these tests on a configured laptop.
+Interception.DefineProp("Open", {Call: RejectDriverOpen})
+
 try {
     TestMatching()
     TestDeviceSelection()
@@ -12,9 +16,13 @@ try {
     TestConfig()
     ReportPass()
     ExitApp(0)
-} catch as e {
-    FileAppend("FAIL: " e.Message " (line " e.Line ")`n", "**", "UTF-8")
+} catch as testFailure {
+    FileAppend("FAIL: " testFailure.Message " (line " testFailure.Line ")`n", "**", "UTF-8")
     ExitApp(1)
+}
+
+RejectDriverOpen(*) {
+    throw Error("Interception.Open is disabled in unit tests")
 }
 
 TestMatching() {

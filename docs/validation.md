@@ -52,4 +52,3 @@ pwsh -File .\tests\run.ps1 -AutoHotkey 'C:\Program Files\AutoHotkey\v2\AutoHotke
 実行スクリプトの構文検証、設定の検証、デバイス候補の一意性と除外優先、マウススロットの除外、UTF-16文字列の読み取り、遮断テストでの解除失敗と再試行を確認します。InterceptionのDLL・ドライバ・接続キーボードは不要です。`block-test.ahk` 全体は実行せず、解除関数だけを取り出して偽のAPIで検証します。
 
 同じテストをGitHub Actionsでも実行します。これらは物理入力の遮断・復旧やスリープ復帰の実機確認を代替しません。
-

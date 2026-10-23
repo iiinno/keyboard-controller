@@ -116,4 +116,3 @@ Interception.BlockDevice(InternalId)
 SetTimer(Drain, 10)
 SetTimer(Tick, 1000)
 ToolTip("block-test: built-in keyboard BLOCKED, " Remaining " s left")
-

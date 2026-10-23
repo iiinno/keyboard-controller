@@ -3,7 +3,7 @@ Assertions := 0
 AssertEqual(actual, expected, label) {
     global Assertions
     Assertions += 1
-    if (actual != expected)
+    if (actual !== expected)
         throw Error(label ": expected '" expected "', got '" actual "'")
 }
 

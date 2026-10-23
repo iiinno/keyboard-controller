@@ -33,8 +33,8 @@ try {
     AssertEqual(Messages.Length, 2, "no duplicate success log")
     ReportPass()
     ExitApp(0)
-} catch as e {
-    FileAppend("FAIL: " e.Message " (line " e.Line ")`n", "**", "UTF-8")
+} catch as testFailure {
+    FileAppend("FAIL: " testFailure.Message " (line " testFailure.Line ")`n", "**", "UTF-8")
     ExitApp(1)
 }
 
