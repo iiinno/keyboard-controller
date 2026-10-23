@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0 64-bit
 ; A second copy would hold a second block. Force replaces the first instead.
 #SingleInstance Force
+; A native tray menu pauses SetTimer and could extend the eight-second block.
+#NoTrayIcon
 
 ; A modal warning dialog would freeze this test while it holds a block, which is the
 ; one moment it must not stall. This directive must come before the includes so that
@@ -44,13 +46,16 @@ Release() {
     if Released
         return true
     SetTimer(Drain, 0)
-    released := Interception.Close()
-    Released := true
-    if released
+    closeSucceeded := Interception.Close()
+    ; AutoHotkey variable names are case-insensitive: `released` would overwrite
+    ; the global Released flag. Mark completion only after a successful close so
+    ; OnExit can retry when context destruction failed.
+    Released := closeSucceeded
+    if closeSucceeded
         Log("Release requested: Interception context destroyed")
     else
         Log("ERROR: Interception context could not be destroyed. Reboot if the built-in keyboard is not responsive.")
-    return released
+    return closeSucceeded
 }
 
 Drain() {
@@ -74,7 +79,7 @@ Tick() {
         ? "Done. The Interception context was destroyed. Test the built-in keyboard now.`n`nLog: " LogPath
         : "The Interception context could not be destroyed. Use recover.ahk or reboot if the keyboard does not respond.`n`nLog: " LogPath
     MsgBox(message, "block-test")
-    ExitApp(0)
+    ExitApp(released ? 0 : 1)
 }
 
 OnBlockTestError(err, mode) {

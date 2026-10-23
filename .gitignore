@@ -1,5 +1,7 @@
 # Machine-specific configuration
 config.ini
+config.ini.bak
+config.ini.setup-*.tmp
 
 # Runtime state and diagnostics
 logs/
@@ -7,8 +9,14 @@ tools/device-list.txt
 
 # Third-party binary dependency
 lib/interception.dll
+.runtime/
 
 # Local shortcuts and OS files
 *.lnk
 Thumbs.db
 .DS_Store
+
+# Portable build output
+dist/
+portable/keyboard-controller
+portable/coverage.out
