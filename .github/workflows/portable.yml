@@ -1,0 +1,47 @@
+name: Linux and macOS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: portable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Format source for review
+        run: gofmt -w *.go
+      - name: Export formatted source
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          print('FORMATTED_GO_JSON:'+json.dumps({str(p):p.read_text() for p in pathlib.Path('.').glob('*.go')}))
+          PY
+      - name: Vet and test native code
+        run: |
+          go vet ./...
+          go test -race -cover -v ./...
+      - name: Build and enumerate without grabbing
+        run: |
+          go build -trimpath -o keyboard-controller .
+          ./keyboard-controller version
+          ./keyboard-controller devices --json
