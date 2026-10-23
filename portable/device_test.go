@@ -172,6 +172,22 @@ func TestEightSecondTestRequiresExternal(t *testing.T) {
 	}
 }
 
+func TestEightSecondLimitIncludesSuspend(t *testing.T) {
+	c, f := fixture(t)
+	f.onGrab = func() { f.now += 9000 } // Simulate sleep immediately after blocking.
+	var out bytes.Buffer
+	started := time.Now()
+	if err := run(f, c.cfg, strings.NewReader(""), &out, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Fatal("8-second test continued after the native clock deadline")
+	}
+	if f.grabs != 1 || f.releases != 1 || f.grabbed != "" {
+		t.Fatal("test did not release after suspend")
+	}
+}
+
 func TestLaunchersEscapePaths(t *testing.T) {
 	homeDir := t.TempDir()
 	executable := filepath.Join(homeDir, "with spaces' and $dollar", "keyboard-controller")

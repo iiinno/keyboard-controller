@@ -228,6 +228,7 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 	if test {
 		c.settleUntil = b.NowMS()
 	}
+	testUntil := b.NowMS() + 8000 // Native uptime includes suspend; Go timers may not.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 	defer stop()
 	if test {
@@ -283,6 +284,9 @@ func run(b Backend, cfg Config, input io.Reader, out io.Writer, pass, test bool)
 	previous := ""
 	testStarted := false
 	for {
+		if test && b.NowMS() >= testUntil {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return nil
