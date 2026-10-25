@@ -9,6 +9,7 @@
 #SingleInstance Force
 #Include lib\Config.ahk
 #Include lib\Devices.ahk
+#Include lib\ControlPanel.ahk
 
 ; Laptop internal keyboard auto-block controller.
 ;
@@ -58,8 +59,9 @@ Main() {
         FaultReason: "",
         InternalDeviceId: 0,
         DetectErrors: 0,
-        SettleUntil: G.Cfg.SettleMs ? A_TickCount + G.Cfg.SettleMs : 0,
-        LastTick: A_TickCount,
+        SettleUntil: G.Cfg.SettleMs ? ControllerNow() + G.Cfg.SettleMs : 0,
+        LastTick: ControllerNow(),
+        PauseUntil: 0,
         LastLoggedTarget: ""
     }
 
@@ -128,20 +130,21 @@ RefreshExternal() {
 ; decision and application
 ; ---------------------------------------------------------------------------
 
-; The single place that decides whether the built-in keyboard may be blocked. Pure,
-; so it can be read as the whole rule. Anything not positively known to be safe to
-; block resolves to PASS, which is the fail-open requirement written as code.
-DecideInternalState(mode, link, health) {
-    return (mode = "AUTO" && link = "CONNECTED" && health = "OK") ? "BLOCKED" : "PASS"
-}
-
 Reconcile(reason) {
     global G
 
-    desired := G.State.SettleUntil ? "PASS" : DecideInternalState(G.State.Mode, G.State.Link, G.State.Health)
-    if (desired = G.State.Applied)
-        return
-    ApplyState(desired, reason)
+    ; Keep ordinary timers and GUI actions from applying a stale decision while
+    ; another action starts or cancels a temporary pass.
+    previousCritical := A_IsCritical
+    Critical("On")
+    try {
+        paused := PauseRemainingSeconds(G.State.PauseUntil, ControllerNow()) > 0
+        desired := G.State.SettleUntil ? "PASS" : DecideInternalState(G.State.Mode, G.State.Link, G.State.Health, paused)
+        if (desired != G.State.Applied)
+            ApplyState(desired, reason)
+    } finally {
+        Critical(previousCritical)
+    }
 }
 
 ApplyState(target, reason) {
@@ -225,7 +228,11 @@ DrainInternal() {
 PollTick() {
     global G
 
-    now := A_TickCount
+    now := ControllerNow()
+    if (G.State.PauseUntil && now >= G.State.PauseUntil) {
+        G.State.PauseUntil := 0
+        Log("INFO", "Temporary internal-keyboard ON expired; resuming AUTO evaluation")
+    }
     gap := now - G.State.LastTick
     G.State.LastTick := now
 
@@ -238,10 +245,14 @@ PollTick() {
     }
 
     ; -1 means a suspend notification was received and resume has not been observed yet.
-    if (G.State.SettleUntil < 0)
+    if (G.State.SettleUntil < 0) {
+        UpdateTray()
         return
-    if (G.State.SettleUntil && now < G.State.SettleUntil)
+    }
+    if (G.State.SettleUntil && now < G.State.SettleUntil) {
+        UpdateTray()
         return
+    }
     if (G.State.SettleUntil > 0)
         G.State.SettleUntil := 0
 
@@ -259,7 +270,7 @@ HandleResume() {
     if (G.State.Applied = "BLOCKED")
         ApplyState("PASS", "resume")
     G.State.Link := "UNKNOWN"
-    G.State.SettleUntil := G.Cfg.SettleMs ? A_TickCount + G.Cfg.SettleMs : 0
+    G.State.SettleUntil := G.Cfg.SettleMs ? ControllerNow() + G.Cfg.SettleMs : 0
     UpdateTray()
 }
 
@@ -295,15 +306,33 @@ OnToggleRequest(*) {
 SetMode(mode) {
     global G
 
-    if (G.State.Mode = mode)
+    if (mode != "AUTO" && mode != "FORCED_ON")
+        throw Error("Mode must be AUTO or FORCED_ON")
+    if (G.State.Mode = mode && !G.State.PauseUntil)
         return
+    G.State.PauseUntil := 0
     G.State.Mode := mode
     Log("INFO", "Mode=" mode)
+    ; Releasing must not wait for the external-device enumeration.
+    if (mode = "FORCED_ON")
+        Reconcile("forced-on")
     RefreshExternal()
     Reconcile("mode-change")
     UpdateTray()
     Notify("Laptop Keyboard: " mode, G.State.Applied = "BLOCKED"
         ? "Built-in keyboard blocked" : "Built-in keyboard PASS")
+}
+
+TemporarilyEnable(minutes) {
+    global G
+
+    if (!IsInteger(minutes) || minutes < 1 || minutes > 60)
+        throw Error("Temporary ON duration must be an integer from 1 to 60 minutes")
+    G.State.PauseUntil := ControllerNow() + minutes * 60000
+    G.State.Mode := "AUTO"
+    Log("INFO", "Temporary internal-keyboard ON for " minutes " minutes")
+    Reconcile("temporary-on")
+    UpdateTray()
 }
 
 ; Tray action, and the manual recovery path for a failed identification: retry the
@@ -316,7 +345,7 @@ RefreshNow(*) {
         G.State.FaultReason := ""
         G.State.InternalDeviceId := 0
     }
-    G.State.LastTick := A_TickCount
+    G.State.LastTick := ControllerNow()
     RefreshExternal()
     Reconcile("manual-refresh")
     UpdateTray()
@@ -330,7 +359,7 @@ RegisterHotkey() {
         Log("INFO", "Toggle hotkey registered: " G.Cfg.ToggleHotkey)
     } catch as e {
         Log("ERROR", "hotkey '" G.Cfg.ToggleHotkey "' could not be registered: " e.Message)
-        Notify("Laptop Keyboard: hotkey failed", G.Cfg.ToggleHotkey " could not be registered. Use the tray menu.")
+        Notify("Laptop Keyboard: hotkey failed", G.Cfg.ToggleHotkey " could not be registered. Open the control panel from the tray icon.")
     }
 }
 
@@ -339,7 +368,26 @@ RegisterHotkey() {
 ; ---------------------------------------------------------------------------
 
 BuildTray() {
+    global G
+
+    ; Suppress the native tray menu, whose modal loop stops both safety timers.
+    ; AHK_NOTIFYICON (0x404) is intercepted before AutoHotkey's default handler.
+    A_TrayMenu.Delete()
+    G.Panel := ControlPanel(SetMode, TemporarilyEnable, RefreshNow, OpenLog, (*) => ExitApp())
+    OnMessage(0x404, OnTrayIcon)
     UpdateTray()
+}
+
+OnTrayIcon(wParam, lParam, msg, hwnd) {
+    global G
+
+    if (hwnd != A_ScriptHwnd)
+        return
+    event := lParam & 0xFFFF
+    ; Left/right release, double click, and keyboard activation/context menu.
+    if (event = 0x202 || event = 0x203 || event = 0x205 || event = 0x7B || event = 0x400 || event = 0x401)
+        G.Panel.Show()
+    return 0
 }
 
 UpdateTray() {
@@ -353,24 +401,7 @@ UpdateTray() {
     A_IconTip := Format("Laptop Keyboard Controller`nMode: {1}`nInternal: {2}`nExternal: {3}`nHealth: {4}"
         , G.State.Mode, internal, external, health)
 
-    status := ["Mode: " G.State.Mode, "Internal Keyboard: " internal
-        , "External Keyboard: " external, "Health: " health]
-
-    A_TrayMenu.Delete()
-    for line in status {
-        A_TrayMenu.Add(line, Noop)
-        A_TrayMenu.Disable(line)
-    }
-    A_TrayMenu.Add()
-    A_TrayMenu.Add("Switch to AUTO", (*) => SetMode("AUTO"))
-    A_TrayMenu.Add("Force Internal Keyboard ON", (*) => SetMode("FORCED_ON"))
-    A_TrayMenu.Add("Refresh Devices", RefreshNow)
-    A_TrayMenu.Add("Open Log", OpenLog)
-    A_TrayMenu.Add()
-    A_TrayMenu.Add("Exit", (*) => ExitApp())
-}
-
-Noop(*) {
+    G.Panel.Update(G.State, ControllerNow())
 }
 
 OpenLog(*) {
@@ -450,3 +481,4 @@ OnScriptExit(reason, code) {
 
     return 0
 }
+

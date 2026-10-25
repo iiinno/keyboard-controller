@@ -1,0 +1,60 @@
+name: Linux and macOS
+
+on:
+  pull_request:
+  workflow_call:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: portable
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Check Go formatting
+        run: test -z "$(gofmt -l *.go)"
+      - name: Validate GitHub Actions workflows
+        if: matrix.os == 'ubuntu-24.04'
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck= -pyflakes= ../.github/workflows/*.yml
+      - name: Vet and test native code
+        run: |
+          go vet ./...
+          go test -race -cover -v ./...
+      - name: Build and enumerate without grabbing
+        run: |
+          go build -trimpath -o keyboard-controller .
+          ./keyboard-controller version
+          ./keyboard-controller devices --json
+      - name: Verify real evdev grabbing using isolated virtual keyboards
+        if: runner.os == 'Linux'
+        run: |
+          sudo modprobe uinput
+          sudo env KEYBOARD_CONTROLLER_UINPUT=1 CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/root-go-cache" "$(command -v go)" test -run '^TestLinuxUinput' -v ./...
+      - name: Package and verify installation
+        run: |
+          sh ../scripts/package-unix.sh
+          sh ../tests/install-unix.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
