@@ -21,6 +21,7 @@ try {
     TestModesAndFault()
     TestResume()
     TestPanel()
+    TestPanelSystemMenus()
     ReportPass()
     G.Panel.Window.Destroy()
     ExitApp(0)
@@ -193,6 +194,68 @@ TestPanel() {
 ClickControl(control) {
     DllCall("SendMessageW", "ptr", control.Hwnd, "uint", 0xF5, "uptr", 0, "ptr", 0, "ptr")
     Sleep(30)
+}
+
+TestPanelSystemMenus() {
+    global G, HeartbeatCount, MenuSnapshot
+    hwnd := G.Panel.Window.Hwnd
+    watchdog := CallbackCreate(SnapshotMenuState)
+    disconnect := CallbackCreate(DisconnectMenuKeyboard)
+    SetTimer(Heartbeat, 10)
+    SetTimer(PollTick, 20)
+    try {
+        for attempt in ["Alt+Space", "window icon", "title bar context menu"] {
+            ResetState()
+            Reconcile("menu test")
+            AssertEqual(G.State.Applied, "BLOCKED", attempt " starts blocked")
+            G.Panel.Show()
+            WinGetPos(&x, &y,,, hwnd)
+            point := ((y + 10) << 16) | ((x + 10) & 0xFFFF)
+            ticks := HeartbeatCount
+            MenuSnapshot := {Applied: "", Ticks: ticks}
+            disconnectTimer := DllCall("SetTimer", "ptr", 0, "uptr", 0, "uint", 100, "ptr", disconnect, "uptr")
+            timer := DllCall("SetTimer", "ptr", 0, "uptr", 0, "uint", 300, "ptr", watchdog, "uptr")
+            try {
+                AssertEqual(timer != 0 && disconnectTimer != 0, true, "native watchdogs start")
+                switch attempt {
+                    case "Alt+Space":
+                        PostMessage(0x112, 0xF100, 0x20,, hwnd)
+                    case "window icon":
+                        PostMessage(0x112, 0xF090, point,, hwnd)
+                    case "title bar context menu":
+                        PostMessage(0x7B, hwnd, point,, hwnd)
+                }
+                deadline := ControllerNow() + 3000
+                while (MenuSnapshot.Applied = "" && ControllerNow() < deadline)
+                    Sleep(10)
+                AssertEqual(MenuSnapshot.Applied, "PASS", attempt " cannot delay disconnect release")
+                AssertEqual(MenuSnapshot.Ticks > ticks, true, attempt " keeps timers running")
+            } finally {
+                DllCall("KillTimer", "ptr", 0, "uptr", timer)
+                DllCall("KillTimer", "ptr", 0, "uptr", disconnectTimer)
+            }
+        }
+        PostMessage(0x112, 0xF060, 0,, hwnd)
+        Sleep(50)
+        AssertEqual(DllCall("IsWindowVisible", "ptr", hwnd, "int"), 0, "system close still hides panel")
+    } finally {
+        SetTimer(Heartbeat, 0)
+        SetTimer(PollTick, 0)
+        CallbackFree(watchdog)
+        CallbackFree(disconnect)
+        G.Panel.Hide()
+    }
+}
+
+DisconnectMenuKeyboard(*) {
+    global ExternalLink
+    ExternalLink := "DISCONNECTED"
+}
+
+SnapshotMenuState(*) {
+    global G, HeartbeatCount, MenuSnapshot
+    MenuSnapshot := {Applied: G.State.Applied, Ticks: HeartbeatCount}
+    DllCall("EndMenu")
 }
 
 Heartbeat() {

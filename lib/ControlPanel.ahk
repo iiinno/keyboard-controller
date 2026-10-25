@@ -5,6 +5,9 @@
 class ControlPanel {
     __New(onMode, onPause, onRefresh, onLog, onExit) {
         this.Window := Gui("-MaximizeBox -MinimizeBox", "keyboard-controller")
+        this.MenuHandler := this.SuppressSystemMenu.Bind(this)
+        OnMessage(0x112, this.MenuHandler)
+        OnMessage(0x7B, this.MenuHandler)
         this.Window.SetFont("s10", "Yu Gothic UI")
         this.Window.MarginX := 16
         this.Window.MarginY := 16
@@ -42,6 +45,14 @@ class ControlPanel {
 
     Hide() {
         this.Window.Hide()
+    }
+
+    SuppressSystemMenu(wParam, lParam, msg, hwnd) {
+        if (hwnd != this.Window.Hwnd)
+            return
+        command := wParam & 0xFFF0
+        if (msg = 0x7B || command = 0xF090 || command = 0xF100)
+            return 0
     }
 
     Update(state, now) {
